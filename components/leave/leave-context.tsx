@@ -6,16 +6,17 @@ import {
   getEmployee,
   getLeaveTypeSafe,
   policyEffectiveAt,
+  hydrateOrg,
   TODAY,
   dayCount,
   fmtShort,
   statusLabel,
   caseFor,
   balanceOf,
-  EMPLOYEE_ROLES,
   roleLabels,
-  POSITIONS,
   getPosition,
+  type Zone,
+  type Department,
   type Status,
   type Employee,
   type LeaveRequest,
@@ -51,6 +52,9 @@ import {
   type EligibilityDto,
   type OrgEligibility,
   type PositionDto,
+  type ZoneDto,
+  type DepartmentDto,
+  type AuthAccess,
 } from '@/lib/leave-api'
 import { useAuth } from '@/lib/auth'
 
@@ -87,7 +91,13 @@ export interface CreateLeaveTypeInput {
   steps: { role: ApproverRole; slaDays: number; note: string }[]
 }
 
-export type EmployeeRow = Employee & { active: boolean; userId: string; payrollNo: string; roleIds: string[] }
+export type EmployeeRow = Employee & {
+  active: boolean
+  userId: string
+  payrollNo: string
+  roleIds: string[]
+  scopedGrants: Array<{ roleId: string; departmentId?: string | null; zoneId?: string | null }>
+}
 
 export interface RegisterEmployeeInput {
   full_name: string
@@ -125,6 +135,8 @@ export interface CustomDeptConfig {
   id: string
   name: string
   zoneId: string
+  parentId?: string
+  unitType?: string
 }
 
 export interface CustomRoleConfig {
@@ -133,34 +145,66 @@ export interface CustomRoleConfig {
   description: string
 }
 
-export const ROLE_PERMISSION_MODULES = ['requests', 'policies', 'documents', 'delegations', 'reports', 'admin']
-export const ROLE_PERMISSION_ACTIONS = ['view', 'create', 'update', 'delete', 'approve', 'export']
+export const ROLE_PERMISSION_MODULES = ['requests', 'policies', 'documents', 'delegations', 'reports', 'staff', 'admin']
+export const ROLE_PERMISSION_ACTIONS = ['view', 'create', 'update', 'delete', 'approve']
 
 export const ROLE_PERMISSION_CODE_META: { code: string; module: string; label: string; hint: string }[] = [
+  { code: 'view_cross_zone', module: 'requests', label: 'view_cross_zone', hint: 'Read leave requests in every zone, not only the scoped ones (central offices only).' },
+  { code: 'view_cross_zone', module: 'staff', label: 'view_cross_zone', hint: 'Read the staff directory in every zone, not only the scoped one.' },
+  { code: 'view_cross_zone', module: 'reports', label: 'view_cross_zone', hint: 'Produce organisation-wide report aggregates instead of zone/department scoped ones.' },
   { code: 'approve_zone', module: 'requests', label: 'approve_zone', hint: 'Approve leave for staff outside your own zone (regional oversight).' },
   { code: 'view_medical_documents', module: 'documents', label: 'view_medical_documents', hint: 'Reveal restricted medical & birth records (HR privacy gate).' },
   { code: 'edit_policy', module: 'policies', label: 'edit_policy', hint: 'Revise leave-type policies and approval workflows.' },
   { code: 'view_gender_reports', module: 'reports', label: 'view_gender_reports', hint: 'Unlock gender-split reporting (restricted personnel data).' },
 ]
 
+/**
+ * Fallback matrix, used only when /api/roles returns nothing. Mirrors
+ * DatabaseSeeder::seedPermissions(). Codes with no enforcement point are
+ * deliberately absent - see migration 2026_10_03_120000.
+ */
 const SEED_ROLE_PERMISSIONS: Record<string, Record<string, string[]>> = {
   SUPERVISOR: {
-    requests: ['view', 'create', 'update', 'approve'],
+    requests: ['view', 'create', 'approve', 'view_own', 'edit_own', 'submit', 'withdraw', 'reject', 'return'],
     policies: ['view'],
     documents: ['view'],
+    staff: ['view_own'],
     reports: ['view'],
+    approval_workflows: ['view'],
+    case_handovers: ['view', 'create', 'accept', 'reject', 'complete'],
   },
-  DEPT_HEAD: { requests: ['view', 'approve', 'return', 'reject', 'export'], reports: ['view'] },
-  ZONAL_HEAD: { requests: ['view', 'approve', 'return', 'reject', 'export', 'approve_zone'], reports: ['view'] },
+  DEPT_HEAD: {
+    requests: ['view', 'approve', 'view_own', 'edit_own', 'submit', 'withdraw', 'reject', 'return'],
+    staff: ['view_own'],
+    reports: ['view'],
+    approval_workflows: ['view'],
+    case_handovers: ['view', 'create', 'accept', 'reject', 'complete'],
+  },
+  ZONAL_HEAD: {
+    requests: ['view', 'approve', 'approve_zone', 'view_own', 'edit_own', 'submit', 'withdraw', 'reject', 'return'],
+    staff: ['view_own'],
+    reports: ['view'],
+    approval_workflows: ['view'],
+    case_handovers: ['view', 'create', 'accept', 'reject', 'complete'],
+  },
   HR: {
-    requests: ['view', 'create', 'update', 'delete', 'return', 'approve', 'export', 'approve_zone'],
-    policies: ['view', 'create', 'update', 'delete', 'edit_policy'],
-    documents: ['view', 'create', 'delete', 'view_medical_documents'],
+    requests: ['view', 'create', 'approve', 'approve_zone', 'view_cross_zone', 'view_own', 'edit_own', 'submit', 'withdraw', 'reject', 'return'],
+    policies: ['view', 'edit_policy'],
+    documents: ['view', 'create', 'view_medical_documents'],
     delegations: ['view', 'create', 'update'],
-    reports: ['view', 'export', 'view_gender_reports'],
-    admin: ['view', 'create', 'update'],
+    reports: ['view', 'view_gender_reports', 'view_cross_zone'],
+    staff: ['view_cross_zone', 'view_own'],
+    admin: ['view', 'create', 'update', 'delete'],
+    approval_workflows: ['view', 'create', 'update'],
+    case_handovers: ['view', 'create', 'accept', 'reject', 'complete'],
   },
-  FINAL_AUTHORITY: { requests: ['view', 'approve', 'reject'], reports: ['view', 'export', 'view_gender_reports'] },
+  FINAL_AUTHORITY: {
+    requests: ['view', 'approve', 'view_cross_zone', 'view_own', 'edit_own', 'submit', 'withdraw', 'reject', 'return'],
+    reports: ['view', 'view_gender_reports', 'view_cross_zone'],
+    staff: ['view_cross_zone', 'view_own'],
+    approval_workflows: ['view'],
+    case_handovers: ['view', 'create', 'accept', 'reject', 'complete'],
+  },
 }
 
 interface LeaveContextValue {
@@ -173,8 +217,10 @@ interface LeaveContextValue {
   updatePosition: (id: string, patch: { title?: string; departmentId?: string; zoneId?: string | null; tier?: number; isFinalAuthority?: boolean; defaultRoleIds?: string[] }) => Promise<boolean>
   deletePosition: (id: string) => Promise<boolean>
   supervisorMode: boolean
+  access: AuthAccess | null
   setEmployee: (id: string) => void
-  toggleSupervisor: () => void
+  canViewEmployee: (employeeId: string) => boolean
+  rolesOf: (employeeId: string) => ApproverRole[]
   requests: LeaveRequest[]
   notifications: NotificationItem[]
   delegations: Delegation[]
@@ -184,14 +230,23 @@ interface LeaveContextValue {
   caseOf: (requestId: string) => CaseRecord | undefined
   policies: LeavePolicy[]
   leaveTypes: LeaveType[]
+  /**
+   * Resolved id of the ANNUAL leave type (by code). Views that need the annual
+   * entitlement must use this rather than a hardcoded `'lt1'`, which belonged
+   * to the old bundled catalogue.
+   */
+  annualTypeId: string
   workflowDefs: WorkflowDef[]
   rolePermissions: Record<string, Record<string, string[]>>
   roleNames: Record<string, string>
+  /** Backend `roles.description` per role id — the scopes tab renders these. */
+  roleDescriptions: Record<string, string>
   permissionModules: string[]
   permissionActions: string[]
   permissionCodes: PermissionCodeMeta[]
   validPermissionCodes: string[]
   can: (module: string, code: string) => boolean
+  hasPerm: (code: string) => boolean
   pendingApprovals: LeaveRequest[]
   activeRequests: LeaveRequest[]
   typeOf: (id: string) => LeaveType | undefined
@@ -200,9 +255,13 @@ interface LeaveContextValue {
   orgEligibility: OrgEligibility | null
   submitRequest: (input: NewRequestInput) => LeaveRequest
   updateRequest: (requestId: string, patch: Partial<Pick<LeaveRequest, 'startDate' | 'endDate' | 'reason' | 'isHalfDay'>>) => void
-  decide: (requestId: string, stepOrder: number, decision: 'approved' | 'rejected' | 'returned', comments: string, endDate?: string) => void
+  decide: (requestId: string, stepOrder: number, decision: 'approved' | 'rejected' | 'returned', comments: string, endDate?: string, signaturePath?: string, signatureHash?: string) => void
   resubmit: (requestId: string, documentName?: string) => void
   withdrawRequest: (requestId: string, reason?: string) => void
+  /** Retry-submit an orphaned draft (create succeeded, submit failed). */
+  submitDraft: (requestId: string) => void
+  /** True deletion — drafts only, applicant-only, verified by the API. */
+  deleteDraft: (requestId: string) => void
   createDelegation: (input: { delegatorId: string; delegateId: string; scope: string; startDate: string; endDate: string }) => void
   revokeDelegation: (id: string) => void
   setDelegationActive: (id: string, active: boolean) => void
@@ -221,24 +280,41 @@ interface LeaveContextValue {
       { payrollNo?: string; positionId?: string; departmentId?: string; zoneId?: string; roleIds?: string[] },
   ) => void
   toggleEmployeeActive: (employeeId: string) => void
+  /** Permanent staff removal — API refuses anyone with history (422 toast). */
+  deleteEmployee: (employeeId: string) => Promise<boolean>
   registerEmployee: (input: RegisterEmployeeInput) => Promise<Employee | null>
   createLeaveType: (input: CreateLeaveTypeInput) => void
   updateLeaveType: (leaveTypeId: string, patch: Partial<Pick<LeaveType, 'name' | 'swahili' | 'short' | 'description' | 'color' | 'paid'>>) => void
-  updateWorkflow: (leaveTypeId: string, steps: { role: ApproverRole; slaDays: number; note: string }[]) => void
+  deleteLeaveType: (leaveTypeId: string) => Promise<boolean>
+  updateWorkflow: (leaveTypeId: string, steps: { role: ApproverRole; slaDays: number; note: string }[], defId?: string) => void
+  createWorkflow: (input: { leaveTypeId: string; minDurationDays?: number; zoneId?: string | null; steps: { role: ApproverRole; slaDays: number; note: string }[] }) => void
+  setWorkflowActive: (workflowId: string, active: boolean) => void
+  deleteWorkflow: (workflowId: string) => Promise<boolean>
   saveRolePermissions: (next: Record<string, Record<string, string[]>>) => void
   customZones: CustomZoneConfig[]
   customDepartments: CustomDeptConfig[]
+  allZones: CustomZoneConfig[]
+  allDepts: CustomDeptConfig[]
   customRoles: CustomRoleConfig[]
   customRoleAssignments: Record<string, string[]>
-  addZone: (input: Omit<CustomZoneConfig, 'id'>) => void
-  removeZone: (id: string) => void
-  addDepartment: (input: Omit<CustomDeptConfig, 'id'>) => void
-  removeDepartment: (id: string) => void
-  createRole: (input: { label: string; description: string }) => void
-  updateRole: (roleId: string, patch: Partial<Pick<CustomRoleConfig, 'label' | 'description'>>) => void
-  deleteRole: (roleId: string) => void
-  assignCustomRole: (employeeId: string, roleId: string, on: boolean) => void
-  resetData: () => void
+  addZone: (input: Omit<CustomZoneConfig, 'id'>) => Promise<boolean>
+  updateZone: (id: string, patch: Partial<Omit<CustomZoneConfig, 'id'>>) => Promise<boolean>
+  removeZone: (id: string) => Promise<boolean>
+  addDepartment: (input: Omit<CustomDeptConfig, 'id'>) => Promise<boolean>
+  updateDepartment: (id: string, patch: Partial<Omit<CustomDeptConfig, 'id'>>) => Promise<boolean>
+  removeDepartment: (id: string) => Promise<boolean>
+  createRole: (input: { label: string; description: string }) => Promise<boolean>
+  updateRole: (roleId: string, patch: Partial<Pick<CustomRoleConfig, 'label' | 'description'>>) => Promise<boolean>
+  /** `reassignTo` hands the role's live workflow steps to that role before archiving.
+   *  Returns 'blocked' when workflows still reference the role and no target was given. */
+  deleteRole: (roleId: string, reassignTo?: string) => Promise<'deleted' | 'blocked' | 'failed'>
+  assignCustomRole: (employeeId: string, roleId: string, on: boolean) => Promise<boolean>
+  deptHeads: Record<string, { employee_id: string; full_name: string } | null>
+  zoneHeads: Record<string, { employee_id: string; full_name: string } | null>
+  setDepartmentHead: (departmentId: string, employeeId: string) => Promise<boolean>
+  clearDepartmentHead: (departmentId: string) => Promise<boolean>
+  setZoneHead: (zoneId: string, employeeId: string) => Promise<boolean>
+  clearZoneHead: (zoneId: string) => Promise<boolean>
 }
 
 const LeaveContext = React.createContext<LeaveContextValue | null>(null)
@@ -384,7 +460,7 @@ function employeeRow(j: EmployeeDto): EmployeeRow {
   return {
     id: j.id,
     userId: j.user_id ?? '',
-    roleIds: j.role_ids ?? [],
+    roleIds: [...new Set(j.role_ids ?? [])],
     payrollNo: j.payroll_no ?? '',
     name: j.full_name,
     title: j.position?.title ?? j.position_id ?? '',
@@ -397,6 +473,11 @@ function employeeRow(j: EmployeeDto): EmployeeRow {
     email: j.email ?? '',
     gradient: GRADIENTS[hash % GRADIENTS.length],
     active: j.is_active,
+    scopedGrants: (j.scoped_grants ?? []).map((g) => ({
+      roleId: g.role_id,
+      departmentId: g.department_id,
+      zoneId: g.scope_zone_id,
+    })),
   }
 }
 
@@ -476,6 +557,13 @@ function toWorkflowDef(w: WorkflowDefDto): WorkflowDef {
   return {
     id: w.id,
     leaveTypeId: w.leave_type_id,
+    isActive: w.is_active ?? true,
+    version: w.version,
+    minDurationDays: w.min_duration_days,
+    zoneId: w.zone_id,
+    departmentId: w.department_id,
+    effectiveFrom: w.effective_from,
+    effectiveTo: w.effective_to,
     steps: (w.steps ?? []).map((s) => ({
       role: (s.role_required as ApproverRole) ?? 'SUPERVISOR',
       slaDays: s.sla_days,
@@ -568,8 +656,34 @@ function toHandover(h: HandoverDto): HandoverRecord {
 
 function slaMap(defs: WorkflowDef[]): Record<string, number> {
   const out: Record<string, number> = {}
-  for (const d of defs) for (const s of d.steps) out[s.role] = s.slaDays
+  // Only active definitions route, so only their SLAs are real.
+  for (const d of defs) {
+    if (d.isActive === false) continue
+    for (const s of d.steps) out[s.role] = s.slaDays
+  }
   return out
+}
+
+/** Cached/stale payloads may still carry pivot objects ({ position_id, role_id }) instead of role-id strings. */
+function coerceRoleIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const out: string[] = []
+  for (const entry of value) {
+    if (typeof entry === 'string') out.push(entry)
+    else if (typeof entry === 'object' && entry !== null) {
+      const rid = (entry as Record<string, unknown>).role_id
+      if (typeof rid === 'string') out.push(rid)
+      else if (typeof rid === 'number') out.push(String(rid))
+    }
+  }
+  return out
+}
+
+function normalizePosition(p: PositionDto): PositionDto {
+  // Structural heads (DEPT_HEAD/ZONAL_HEAD) are per-unit grants the server
+  // refuses as unscoped mints, so they can never legitimately appear in a
+  // position's defaults — strip legacy rows rather than offer them.
+  return { ...p, default_roles: coerceRoleIds(p.default_roles).filter((r) => r !== 'DEPT_HEAD' && r !== 'ZONAL_HEAD') }
 }
 
 // ---------------------------------------------------------------------------
@@ -579,8 +693,50 @@ function slaMap(defs: WorkflowDef[]): Record<string, number> {
 export function LeaveProvider({ children }: { children: React.ReactNode }) {
   const { user, token, status } = useAuth()
 
-  const [employeeId, setEmployeeId] = React.useState<string>(user?.employee?.id ?? 'e7')
-  const [supervisorMode, setSupervisorMode] = React.useState<boolean>(false)
+  // Server-authoritative capability payload from /api/me. A role name never
+  // implies zone reach: the backend resolves it to concrete zone/department
+  // grants, and that resolved scope is the only thing the UI may rely on.
+  const access = user?.access ?? null
+  const requestScope = access?.request_scope ?? null
+  const supervisorMode = Boolean(
+    requestScope &&
+      (requestScope.can_view_all_zones ||
+        requestScope.allowed_zone_ids.length > 0 ||
+        requestScope.allowed_department_ids.length > 0),
+  )
+
+  /**
+   * Resolved permission state from /api/me:
+   *   '*'      — wildcard holder, or offline mock mode (no token)
+   *   Set      — the exact codes the backend granted
+   *   null     — signed in but /api/me has not resolved YET
+   *
+   * That third state is why this must be null and not an empty set: during the
+   * very first render `user` is still null, and treating "unknown" as "allow"
+   * fires every loader straight into a 403. Unknown therefore denies.
+   */
+  const resolvedPerms = React.useMemo<ReadonlySet<string> | '*' | null>(() => {
+    if (!token) return '*'
+    if (!Array.isArray(user?.permissions)) return null
+    const set = new Set(user.permissions)
+    return set.has('*') ? '*' : set
+  }, [token, user?.permissions])
+
+  /** Stable string so the boot effect re-fires when /api/me resolves. */
+  const permSignature = React.useMemo(
+    () => (Array.isArray(user?.permissions) ? user.permissions.slice().sort().join(',') : 'pending'),
+    [user?.permissions],
+  )
+
+  const hasPerm = React.useCallback(
+    (code: string): boolean => resolvedPerms === '*' || (resolvedPerms !== null && resolvedPerms.has(code)),
+    [resolvedPerms],
+  )
+
+  // No bundled demo employee id: a signed-in user without an employee profile
+  // (or during the pre-`/api/me` frame) gets '' and the `employee` memo below
+  // supplies a placeholder rather than borrowing a hardcoded person.
+  const [employeeId, setEmployeeId] = React.useState<string>(user?.employee?.id ?? '')
   const [loading, setLoading] = React.useState<boolean>(true)
   const [mounted, setMounted] = React.useState<boolean>(false)
 
@@ -603,6 +759,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
     JSON.parse(JSON.stringify(SEED_ROLE_PERMISSIONS)),
   )
   const [roleNames, setRoleNames] = React.useState<Record<string, string>>({})
+  const [roleDescriptions, setRoleDescriptions] = React.useState<Record<string, string>>({})
   const [permissionModules, setPermissionModules] = React.useState<string[]>(ROLE_PERMISSION_MODULES)
   const [permissionActions, setPermissionActions] = React.useState<string[]>(ROLE_PERMISSION_ACTIONS)
   const [permissionCodes, setPermissionCodes] = React.useState<PermissionCodeMeta[]>(ROLE_PERMISSION_CODE_META)
@@ -615,12 +772,57 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
     }
     return [...codes]
   })
-  const [customZones, setCustomZones] = React.useState<CustomZoneConfig[]>([])
-  const [customDepartments, setCustomDepartments] = React.useState<CustomDeptConfig[]>([])
+  /**
+   * Zones and departments are owned entirely by the database. They used to be
+   * merged as `[...ZONES, ...customZones]` where `ZONES` was a bundled seed
+   * constant, which meant a freshly-wiped installation still rendered seven
+   * phantom zones and eight departments that nobody had created.
+   *
+   * `orgZones`/`orgDepts` hold the server rows (fetched for every signed-in
+   * user, since the endpoints are permission-free) and form the base. The
+   * overrides keyed by id let an admin edit a row optimistically before the
+   * re-fetch lands, and the removed sets act as tombstones so a delete is
+   * representable in state at all.
+   */
+  const [orgZones, setOrgZones] = React.useState<Zone[]>([])
+  const [orgDepts, setOrgDepts] = React.useState<Department[]>([])
+  const [zoneOverrides, setZoneOverrides] = React.useState<Record<string, CustomZoneConfig>>({})
+  const [deptOverrides, setDeptOverrides] = React.useState<Record<string, CustomDeptConfig>>({})
+  const [removedZoneIds, setRemovedZoneIds] = React.useState<string[]>([])
+  const [removedDeptIds, setRemovedDeptIds] = React.useState<string[]>([])
+
+  const allZones = React.useMemo(() => {
+    const removed = new Set(removedZoneIds)
+    return [
+      ...orgZones.filter((z) => !removed.has(z.id) && !(z.id in zoneOverrides)),
+      ...Object.values(zoneOverrides).filter((z) => !removed.has(z.id)),
+    ]
+  }, [orgZones, zoneOverrides, removedZoneIds])
+
+  const allDepts = React.useMemo(() => {
+    const removed = new Set(removedDeptIds)
+    // A zone that is gone takes its departments with it, so a department left
+    // in the fetched list cannot outlive its parent zone.
+    const goneZones = new Set(removedZoneIds)
+    return [
+      ...orgDepts.filter((d) => !removed.has(d.id) && !(d.id in deptOverrides) && !goneZones.has(d.zoneId)),
+      ...Object.values(deptOverrides).filter((d) => !removed.has(d.id) && !goneZones.has(d.zoneId)),
+    ]
+  }, [orgDepts, deptOverrides, removedDeptIds, removedZoneIds])
+
+  /**
+   * Every row is the administrator's row now — there is no bundled seed left to
+   * distinguish from "custom", so these are simply the merged lists typed for
+   * the Settings organisation surfaces.
+   */
+  const customZones = React.useMemo(() => allZones as CustomZoneConfig[], [allZones])
+  const customDepartments = React.useMemo(() => allDepts as CustomDeptConfig[], [allDepts])
   const [customRoles, setCustomRoles] = React.useState<CustomRoleConfig[]>([])
   const [customRoleAssignments, setCustomRoleAssignments] = React.useState<Record<string, string[]>>({})
   const [eligibility, setEligibility] = React.useState<EligibilityDto[]>([])
   const [orgEligibility, setOrgEligibility] = React.useState<OrgEligibility | null>(null)
+  const [deptHeads, setDeptHeads] = React.useState<Record<string, { employee_id: string; full_name: string } | null>>({})
+  const [zoneHeads, setZoneHeads] = React.useState<Record<string, { employee_id: string; full_name: string } | null>>({})
 
   const requestsRef = React.useRef<LeaveRequest[]>([])
   React.useEffect(() => {
@@ -632,39 +834,169 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
     wfRef.current = workflowDefs
   }, [workflowDefs])
 
+  const employeesRef = React.useRef<EmployeeRow[]>([])
+  React.useEffect(() => {
+    employeesRef.current = employees
+  }, [employees])
+
+  // Role ids the backend flags is_system. The custom-role surfaces only ever
+  // list the rest, so built-in roles can never be edited or deleted there.
+  const systemRoleIdsRef = React.useRef<Set<string>>(new Set())
+
+  /**
+   * Custom-role holders are derived from each employee's persisted role_ids, so
+   * an assignment survives a reload instead of living in local state only.
+   * Scoped structural grants (department/zonal head) are built-ins and are
+   * filtered out by the system-role id set. No-op until the role list has been
+   * read once, since only the backend knows which ids are protected.
+   */
+  const syncCustomRoleAssignments = React.useCallback((rows: EmployeeRow[]) => {
+    const system = systemRoleIdsRef.current
+    if (system.size === 0) return
+
+    const next: Record<string, string[]> = {}
+    for (const row of rows) {
+      const custom = (row.roleIds ?? []).filter((id) => !system.has(id))
+      if (custom.length) next[row.id] = custom
+    }
+    setCustomRoleAssignments(next)
+  }, [])
+
   // -------------------------------------------------------------------------
   // Loaders
   // -------------------------------------------------------------------------
 
-  const loadEmployees = React.useCallback(async () => {
-    const res = await safe(leaveApi.org.employees())
-    if (res) setEmployees(res.data.map(employeeRow))
+  // Heads are display-only data (which employee covers each department/zone).
+  // Failures are swallowed — an offline boot must not break on this fetch.
+  const loadOrgHeads = React.useCallback(async () => {
+    // Head maps are only rendered by the admin-only Settings view.
+    if (!hasPerm('admin.view')) {
+      setDeptHeads({})
+      setZoneHeads({})
+      return
+    }
+    const [depts, zones] = await Promise.allSettled([leaveApi.org.departments(), leaveApi.org.zones()])
+    if (depts.status === 'fulfilled') {
+      const map: Record<string, { employee_id: string; full_name: string } | null> = {}
+      for (const d of depts.value.data) map[d.id] = d.head ?? null
+      setDeptHeads(map)
+    }
+    if (zones.status === 'fulfilled') {
+      const map: Record<string, { employee_id: string; full_name: string } | null> = {}
+      for (const z of zones.value.data) map[z.id] = z.head ?? null
+      setZoneHeads(map)
+    }
+  }, [hasPerm])
+
+  /**
+   * Zones + departments, fetched for EVERY signed-in user. Both endpoints are
+   * permission-free server-side, and every screen needs the names (a request's
+   * zone, a calendar filter, a letter's office line) — this used to be a
+   * bundled constant that survived a database wipe as phantom rows.
+   */
+  const loadOrgStructure = React.useCallback(async () => {
+    const [zones, depts] = await Promise.allSettled([leaveApi.org.zones(), leaveApi.org.departments()])
+    if (zones.status === 'fulfilled') {
+      const rows: Zone[] = zones.value.data.map((z) => ({
+        id: z.id,
+        name: z.name,
+        short: z.short,
+        isHQ: z.is_hq,
+        isPemba: z.is_pemba,
+        isCoordination: z.is_coordination,
+      }))
+      // Hydrate BEFORE setState: mutating the module array never re-renders, so
+      // hydrating after would leave exactly one permanently stale frame.
+      hydrateOrg({ zones: rows })
+      setOrgZones(rows)
+    }
+    if (depts.status === 'fulfilled') {
+      const rows: Department[] = depts.value.data.map((d) => ({
+        id: d.id,
+        name: d.name,
+        zoneId: d.zone_id ?? '',
+        parentId: d.parent_department_id ?? undefined,
+        unitType: d.unit_type ?? undefined,
+      }))
+      hydrateOrg({ departments: rows })
+      setOrgDepts(rows)
+    }
   }, [])
 
+  const loadEmployees = React.useCallback(async () => {
+    const res = await safe(leaveApi.org.employees())
+    if (res) {
+      const rows = res.data.map(employeeRow)
+      // Keep the ref in step here (not only in an effect) so the custom-role
+      // sync is correct no matter which loader resolves first.
+      employeesRef.current = rows
+      // Hydrate BEFORE setState — see loadOrgStructure.
+      hydrateOrg({ employees: rows as unknown as Employee[] })
+      setEmployees(rows)
+      syncCustomRoleAssignments(rows)
+    }
+    // Head maps track scoped grants too, so refresh them with the rows — an
+    // edit-dialog save that drops a scoped grant must not leave a stale head.
+    await loadOrgHeads()
+  }, [syncCustomRoleAssignments, loadOrgHeads])
+
   const loadPositions = React.useCallback(async () => {
+    // Positions are read permission-free server-side and their titles render
+    // for everyone (a request row names its holder's post), so fetch them for
+    // every signed-in user.
     const res = await safe(leaveApi.org.positions())
-    if (res && res.data.length > 0) setPositions(res.data)
+    if (res) {
+      const rows = res.data.map(normalizePosition)
+      hydrateOrg({ positions: rows as unknown as import('@/lib/leave').Position[] })
+      setPositions(rows)
+    }
   }, [])
 
   const loadLeaveTypes = React.useCallback(async () => {
     const res = await safe(leaveApi.leave.types())
-    if (res) setLeaveTypes(res.data.map(toLeaveType))
+    if (res) {
+      const rows = res.data.map(toLeaveType)
+      hydrateOrg({ leaveTypes: rows })
+      setLeaveTypes(rows)
+    }
   }, [])
 
   const loadPolicies = React.useCallback(async () => {
     const res = await safe(leaveApi.leave.currentPolicies())
-    if (res) setPolicies(res.data.map(toPolicy))
+    if (res) {
+      const rows = res.data.map(toPolicy)
+      hydrateOrg({ policies: rows })
+      setPolicies(rows)
+    }
   }, [])
 
   const loadWorkflows = React.useCallback(async () => {
+    // Workflow definitions are permission-gated server-side (policies.view), so
+    // a plain employee legitimately has none. `getWorkflowSafe()` treats that
+    // as "not visible to this session" and simply omits the routing tip.
+    if (!hasPerm('policies.view')) {
+      hydrateOrg({ workflows: [] })
+      setWorkflowDefs([])
+      return
+    }
     const res = await safe(leaveApi.workflows.list())
-    if (res) setWorkflowDefs(res.data.map(toWorkflowDef))
-  }, [])
+    if (res) {
+      const rows = res.data.map(toWorkflowDef)
+      hydrateOrg({ workflows: rows })
+      setWorkflowDefs(rows)
+    }
+  }, [hasPerm])
 
   const loadRequests = React.useCallback(async () => {
+    // /api/requests is gated by requests.view; an employee without it has no
+    // list to fetch and would only collect a 403.
+    if (!hasPerm('requests.view')) {
+      setRequests([])
+      return
+    }
     const res = await safe(leaveApi.requests.list({ scope: 'all', per_page: 500 }))
     if (res) setRequests((res.data.data ?? []).map((d) => requestFromRaw(d, slaMap(wfRef.current))))
-  }, [])
+  }, [hasPerm])
 
   const loadNotifications = React.useCallback(async () => {
     const res = await safe(leaveApi.notifications.list({ per_page: 200 }))
@@ -672,16 +1004,31 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const loadDelegations = React.useCallback(async () => {
+    if (!hasPerm('delegations.view')) {
+      setDelegations([])
+      return
+    }
     const res = await safe(leaveApi.delegations.list())
     if (res) setDelegations(res.data.map((d) => toDelegation(d)))
-  }, [])
+  }, [hasPerm])
 
   const loadCases = React.useCallback(async () => {
+    // Dockets are gated by case_handovers.view like every other list loader;
+    // without it the call would only collect a 403.
+    if (!hasPerm('case_handovers.view')) {
+      setCases([])
+      return
+    }
     const res = await safe(leaveApi.cases.list())
     if (res) setCases(res.data.map((c) => toCase(c, requestsRef.current)))
-  }, [])
+  }, [hasPerm])
 
   const loadHandovers = React.useCallback(async () => {
+    // One request per in-flight row; without requests.view every call 403s.
+    if (!hasPerm('requests.view')) {
+      setHandovers([])
+      return
+    }
     const inFlight = requestsRef.current
       .filter((r) => ['submitted', 'under_review', 'returned_for_correction', 'paused_pending_handover'].includes(r.status))
       .slice(0, 40)
@@ -692,12 +1039,16 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       if (Array.isArray(s.value.data)) all.push(...s.value.data.map(toHandover))
     }
     setHandovers(all)
-  }, [])
+  }, [hasPerm])
 
   const loadAudit = React.useCallback(async () => {
+    if (!hasPerm('admin.view')) {
+      setAudit([])
+      return
+    }
     const res = await safe(leaveApi.audit.list({ per_page: 200 }))
     if (res) setAudit((res.data.data ?? []).map(toAudit))
-  }, [])
+  }, [hasPerm])
 
   const loadEligibility = React.useCallback(async () => {
     const res = await safe(leaveApi.eligibility.my())
@@ -710,11 +1061,19 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   // Permission matrix + catalog are read from the backend; the static
   // SEED_ROLE_PERMISSIONS / module constants are only a fallback.
   const loadRolesAndPermissions = React.useCallback(async () => {
+    // The RBAC matrix and permission catalog are admin-only surfaces.
+    if (!hasPerm('admin.view')) return
+
     const [rolesRes, catRes] = await Promise.all([safe(leaveApi.roles.list()), safe(leaveApi.roles.permissions())])
 
-    if (rolesRes && rolesRes.data.length > 0 && rolesRes.data.some((r) => (r.permissions ?? []).length > 0)) {
+    // Archived roles (delete = archive on the backend) grant nothing, so they
+    // stay out of the matrix and the scope list; `active` is absent on older
+    // payloads, which means the row is live.
+    const liveRoles = (rolesRes?.data ?? []).filter((r) => r.active !== false)
+
+    if (liveRoles.length > 0 && liveRoles.some((r) => (r.permissions ?? []).length > 0)) {
       const matrix: Record<string, Record<string, string[]>> = {}
-      for (const role of rolesRes.data) {
+      for (const role of liveRoles) {
         const byModule: Record<string, string[]> = {}
         for (const p of role.permissions ?? []) (byModule[p.module] ??= []).push(p.action)
         matrix[role.id] = byModule
@@ -725,7 +1084,14 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (rolesRes?.data) {
-      setRoleNames(Object.fromEntries(rolesRes.data.map((r) => [r.id, r.name])))
+      setRoleNames(Object.fromEntries(liveRoles.map((r) => [r.id, r.name])))
+      setRoleDescriptions(Object.fromEntries(liveRoles.map((r) => [r.id, r.description ?? ''])))
+
+      // The backend is the source of truth for which roles exist and which are
+      // built-ins; custom roles are exactly the non-system rows.
+      systemRoleIdsRef.current = new Set(liveRoles.filter((r) => r.is_system).map((r) => r.id))
+      setCustomRoles(liveRoles.filter((r) => !r.is_system).map((r) => ({ id: r.id, label: r.name, description: r.description ?? '' })))
+      syncCustomRoleAssignments(employeesRef.current)
     }
 
     if (catRes?.data && catRes.data.length > 0) {
@@ -744,9 +1110,13 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
           .filter((p) => granular.has(p.action))
           .map((p) => ({ code: p.action, module: p.module, label: p.label ?? p.action, hint: p.hint ?? p.action })),
       )
-      setValidPermissionCodes(catRes.data.map((p) => `${p.module}.${p.action}`))
+      // Grantable codes only. The catalog deliberately lists planned and
+      // deactivated codes so an admin can see they exist, but the backend
+      // refuses to grant them — offering them as toggles just produced a 422
+      // on save ("not enforced yet"), which read as a broken matrix.
+      setValidPermissionCodes(catRes.data.filter((p) => p.is_grantable !== false).map((p) => `${p.module}.${p.action}`))
     }
-  }, [])
+  }, [hasPerm, syncCustomRoleAssignments])
 
   const refreshAfterWrite = React.useCallback(() => {
     loadRequests()
@@ -763,10 +1133,25 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
     loadHandovers()
   }, [loadRequests, loadNotifications, loadCases, loadHandovers])
 
-  // Boot when authenticated
+  // Boot when authenticated. Waits for /api/me to resolve the permission set,
+  // otherwise the first pass runs with `resolvedPerms === null` and every
+  // guarded loader denies itself.
   React.useEffect(() => {
     if (status !== 'authenticated') {
       setLoading(true)
+      // Blank the runtime store too, so a logout never leaves the previous
+      // tenant's staff / zones / departments readable by the next user.
+      hydrateOrg({
+        zones: [],
+        departments: [],
+        positions: [],
+        employees: [],
+        leaveTypes: [],
+        policies: [],
+        workflows: [],
+      })
+      setOrgZones([])
+      setOrgDepts([])
       setRequests([])
       setNotifications([])
       setDelegations([])
@@ -781,6 +1166,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       setOrgEligibility(null)
       setRolePermissions(JSON.parse(JSON.stringify(SEED_ROLE_PERMISSIONS)))
       setRoleNames({})
+      setRoleDescriptions({})
       setPermissionModules(ROLE_PERMISSION_MODULES)
       setPermissionActions(ROLE_PERMISSION_ACTIONS)
       setPermissionCodes(ROLE_PERMISSION_CODE_META)
@@ -795,11 +1181,20 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       })
       return
     }
+
+    // Authenticated but the capability payload has not arrived yet. Hold the
+    // loading screen rather than firing requests we already know will be denied.
+    if (resolvedPerms === null) {
+      setLoading(true)
+      return
+    }
+
     let cancelled = false
     setLoading(true)
-    setEmployeeId(user?.employee?.id ?? 'e7')
+    setEmployeeId(user?.employee?.id ?? '')
     const fire = async () => {
       await Promise.allSettled([
+        loadOrgStructure(),
         loadEmployees(),
         loadLeaveTypes(),
         loadPolicies(),
@@ -812,6 +1207,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         loadAudit(),
         loadRolesAndPermissions(),
         loadEligibility(),
+        loadOrgHeads(),
       ])
       await loadHandovers()
       if (!cancelled) setLoading(false)
@@ -820,8 +1216,9 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true
     }
+    // permSignature re-triggers the boot once /api/me lands the real codes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, status, user?.employee?.id])
+  }, [token, status, user?.employee?.id, permSignature])
 
   // -------------------------------------------------------------------------
   // Derived / helpers
@@ -837,40 +1234,101 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         if (fromAuth.length) return fromAuth
       }
       const row = employees.find((e) => e.id === empId)
-      if (row && row.roleIds.length) return row.roleIds.filter(isApproverRole)
-      return EMPLOYEE_ROLES[empId] ?? []
+      // The server role grants are the only source of truth — there is no
+      // bundled seed map left to fall back to. An unknown employee simply
+      // holds no approver role.
+      return row ? row.roleIds.filter(isApproverRole) : []
     },
     [token, user, employees],
   )
 
   const can = React.useCallback(
     (module: string, code: string): boolean => {
-      const roles: ApproverRole[] = supervisorMode ? ['HR'] : rolesOf(employeeId)
+      // Signed in: the backend-resolved permission list is authoritative.
+      if (token && user?.permissions?.length) {
+        return user.permissions.includes('*') || user.permissions.includes(`${module}.${code}`)
+      }
+      // Offline / mock fallback only.
+      const roles: ApproverRole[] = rolesOf(employeeId)
       const effective: string[] = [...roles, ...(customRoleAssignments[employeeId] ?? [])]
       return effective.some((r) => (rolePermissions[r]?.[module] ?? []).includes(code))
     },
-    [supervisorMode, employeeId, rolesOf, rolePermissions, customRoleAssignments],
+    [token, user, employeeId, rolesOf, rolePermissions, customRoleAssignments],
+  )
+
+  /**
+   * Display-layer counterpart to the backend AccessScopeService: whether a
+   * record belonging to `empId` is inside the caller's request scope. Mirrors
+   * the server rule so the UI never presents a row the API would refuse.
+   */
+  const canViewEmployee = React.useCallback(
+    (empId: string): boolean => {
+      if (!requestScope) return true
+      if (requestScope.can_view_all_zones) return true
+      if (empId === user?.employee?.id) return true
+      const row = employees.find((e) => e.id === empId)
+      if (!row) return false
+      if (row.zoneId && requestScope.allowed_zone_ids.includes(row.zoneId)) return true
+      if (row.departmentId && requestScope.allowed_department_ids.includes(row.departmentId)) return true
+      return false
+    },
+    [requestScope, user, employees],
   )
 
   const employee = React.useMemo<Employee>(() => {
     const found = employees.find((e) => e.id === employeeId)
     if (found) return found
-    const mock = getEmployee(employeeId)
-    return { ...mock, gradient: mock.gradient }
-  }, [employees, employeeId])
+    // No staff row for this id (signed out, or a user whose employee profile
+    // has not been created yet). Build a placeholder from the auth payload so
+    // `.name` / `.hireDate` reads never throw; when there is no profile at all
+    // every field is blank rather than borrowed from a hardcoded person.
+    const a = user?.employee
+    return {
+      id: employeeId,
+      name: a?.full_name ?? user?.username ?? '—',
+      title: a?.position_id ?? '',
+      initials: a?.initials ?? '—',
+      positionId: a?.position_id ?? '',
+      departmentId: a?.department_id ?? '',
+      zoneId: a?.zone_id ?? '',
+      gender: a?.gender ?? 'F',
+      hireDate: a?.hire_date ?? TODAY,
+      email: user?.email ?? '',
+      gradient: 'from-teal-600 to-cyan-600',
+    }
+  }, [employees, employeeId, user])
 
   const typeOf = React.useCallback(
     (id: string) => leaveTypes.find((t) => t.id === id) ?? getLeaveTypeSafe(id),
     [leaveTypes],
   )
 
-  const pendingApprovals = requests.filter(
-    (r) =>
-      (r.status === 'submitted' || r.status === 'under_review' || r.status === 'returned_for_correction') &&
-      r.steps.some((s) => s.status === 'pending'),
+  /**
+   * Annual leave resolved BY CODE, not by a hardcoded id. Leave types are
+   * database rows now and their surrogate ids differ per installation, so
+   * `'lt1'` would point at whichever row happened to be created first. Falls
+   * back to the first type when no ANNUAL type exists, and to '' when the
+   * catalogue is empty (balanceOf then reports a zeroed balance).
+   */
+  const annualTypeId = React.useMemo(
+    () => leaveTypes.find((t) => t.code === 'ANNUAL')?.id ?? leaveTypes[0]?.id ?? '',
+    [leaveTypes],
   )
 
-  const activeRequests = requests.filter((r) => r.status === 'approved' || r.status === 'under_review')
+  const pendingApprovals = React.useMemo(
+    () =>
+      requests.filter(
+        (r) =>
+          (r.status === 'submitted' || r.status === 'under_review' || r.status === 'returned_for_correction') &&
+          r.steps.some((s) => s.status === 'pending'),
+      ),
+    [requests],
+  )
+
+  const activeRequests = React.useMemo(
+    () => requests.filter((r) => r.status === 'approved' || r.status === 'under_review'),
+    [requests],
+  )
 
   const balanceFor = React.useCallback(
     (empId: string, leaveTypeId: string) => {
@@ -918,7 +1376,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
             role: 'SUPERVISOR',
             roleLabel: roleLabels.SUPERVISOR,
             assigneeId: input.employeeId,
-            assigneeName: getEmployee(input.employeeId).name,
+            assigneeName: getEmployee(input.employeeId)?.name ?? input.employeeId,
             via: 'standing',
             slaDays: 2,
             dueAt: TODAY,
@@ -942,7 +1400,14 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         if (!created) return
         const submitted = await safe(leaveApi.requests.submit(created.data.id))
         refreshAfterWrite()
-        if (!submitted) return
+        if (!submitted) {
+          // Create succeeded but submit failed (validation, network): the
+          // row now exists as a draft. Say where it went — without this the
+          // failure used to look like a success while an invisible draft
+          // piled up in the list with no way to submit it again.
+          toast.warning(`${created.data.ref ?? 'Request'} saved as a draft — open it in the list and choose “Submit for approval”.`)
+          return
+        }
         const typeName = typeOf(input.leaveTypeId)?.name ?? input.leaveTypeId
         toast.success(`${submitted.data.ref} submitted. Return date will be set at approval.`)
       })()
@@ -980,11 +1445,11 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   )
 
   const decide = React.useCallback(
-    (requestId: string, stepOrder: number, decision: 'approved' | 'rejected' | 'returned', comments: string, endDate?: string) => {
+    (requestId: string, stepOrder: number, decision: 'approved' | 'rejected' | 'returned', comments: string, endDate?: string, signaturePath?: string, signatureHash?: string) => {
       const req = requests.find((r) => r.id === requestId)
       if (!req) return
       void (async () => {
-        const res = await safe(leaveApi.requests.decide(requestId, { decision, comments, end_date: endDate || null }))
+        const res = await safe(leaveApi.requests.decide(requestId, { decision, comments, end_date: endDate || null, signature_path: signaturePath || req.signaturePath, signature_hash: signatureHash || req.signatureHash }))
         if (!res) {
           refreshAfterWrite()
           return
@@ -1036,6 +1501,43 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
     [requests, refreshWithHandovers],
   )
 
+  const submitDraft = React.useCallback(
+    (requestId: string) => {
+      const req = requests.find((r) => r.id === requestId)
+      if (!req) return
+      void (async () => {
+        const res = await safe(leaveApi.requests.submit(requestId))
+        if (!res) {
+          refreshAfterWrite()
+          return
+        }
+        const merged = requestFromResource(req, res.data, res.workflow, slaMap(wfRef.current))
+        setRequests((prev) => prev.map((r) => (r.id === String(res.data.id) ? merged : r)))
+        refreshWithHandovers()
+        toast.success(`${merged.ref} submitted for approval.`)
+      })()
+    },
+    [requests, refreshAfterWrite, refreshWithHandovers],
+  )
+
+  const deleteDraft = React.useCallback(
+    (requestId: string) => {
+      const req = requests.find((r) => r.id === requestId)
+      if (!req) return
+      if (req.status !== 'draft') {
+        toast.error('Only draft requests can be deleted — submitted requests stay in the audit trail.')
+        return
+      }
+      void (async () => {
+        const res = await safe(leaveApi.requests.destroy(requestId))
+        if (!res) return
+        setRequests((prev) => prev.filter((r) => r.id !== requestId))
+        toast.success(`${req.ref} deleted — it was never submitted.`)
+      })()
+    },
+    [requests],
+  )
+
   const createDelegation = React.useCallback(
     (input: { delegatorId: string; delegateId: string; scope: string; startDate: string; endDate: string }) => {
       void (async () => {
@@ -1049,7 +1551,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         )
         refreshAfterWrite()
         if (res) {
-          const name = getEmployee(input.delegateId).name
+          const name = getEmployee(input.delegateId)?.name ?? input.delegateId
           toast.success(`Delegation created for ${name}. Original authority preserved in audit history.`)
         }
       })()
@@ -1108,7 +1610,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         refreshWithHandovers()
         if (res) {
           const to = getEmployee(input.toOwnerId)
-          toast.success(`Handover recorded. ${to.name.split(' ')[0]} must accept before deciding.`)
+          toast.success(`Handover recorded. ${to?.name.split(' ')[0] ?? 'The delegate'} must accept before deciding.`)
         }
       })()
     },
@@ -1122,7 +1624,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         refreshWithHandovers()
         if (res) {
           const to = getEmployee(res.data.to_employee_id)
-          toast.success(`Docket accepted. ${to.name.split(' ')[0]} can now decide.`)
+          toast.success(`Docket accepted. ${to?.name.split(' ')[0] ?? 'The approver'} can now decide.`)
         }
       })()
     },
@@ -1234,7 +1736,12 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         if (patch.hireDate !== undefined) body.hire_date = patch.hireDate
         if (patch.roleIds !== undefined) body.role_ids = patch.roleIds
         if (patch.password !== undefined) body.password = patch.password
-        if (Object.keys(body).length) await safe(leaveApi.org.updateEmployee(id, body))
+        if (Object.keys(body).length) {
+          // `safe` already toasts the server error; bail so a failed PATCH
+          // never reaches the reload + success toast below.
+          const res = await safe(leaveApi.org.updateEmployee(id, body))
+          if (!res) return
+        }
         await safe(loadEmployees())
         const name = target.name
         if (patch.title) toast.info(`${name} title cannot be edited via the API — update the position instead.`)
@@ -1256,6 +1763,19 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       })()
     },
     [employees, loadEmployees],
+  )
+
+  /** Permanent removal; `safe` surfaces the API's 422 reason (history, head…). */
+  const deleteEmployee = React.useCallback(
+    async (id: string): Promise<boolean> => {
+      const target = employees.find((e) => e.id === id)
+      const res = await safe(leaveApi.org.deleteEmployee(id))
+      if (!res) return false
+      setEmployees((prev) => prev.filter((e) => e.id !== id))
+      toast.success(`${target?.name ?? 'Staff member'} deleted.`)
+      return true
+    },
+    [employees],
   )
 
   const SOFT_BY_COLOR: Record<string, string> = {
@@ -1356,9 +1876,34 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
     [leaveTypes, loadLeaveTypes],
   )
 
+  const deleteLeaveType = React.useCallback(
+    async (leaveTypeId: string): Promise<boolean> => {
+      const existing = leaveTypes.find((t) => t.id === leaveTypeId)
+      const label = existing?.name ?? leaveTypeId
+      // 422 (type carries history) surfaces via `safe`'s toast; local state
+      // only changes on success.
+      const res = await safe(leaveApi.leave.destroyType(leaveTypeId))
+      if (!res) return false
+      // The API takes the type's policy versions and workflow definitions
+      // with it — drop them from local state alongside the type.
+      setLeaveTypes((prev) => prev.filter((t) => t.id !== leaveTypeId))
+      setPolicies((prev) => prev.filter((p) => p.leaveTypeId !== leaveTypeId))
+      setWorkflowDefs((prev) => prev.filter((w) => w.leaveTypeId !== leaveTypeId))
+      toast.success(`${label} leave type deleted, with its policies and workflow.`)
+      return true
+    },
+    [leaveTypes],
+  )
+
   const updateWorkflow = React.useCallback(
-    (leaveTypeId: string, steps: { role: ApproverRole; slaDays: number; note: string }[]) => {
-      const existing = workflowDefs.find((w) => w.leaveTypeId === leaveTypeId)
+    (leaveTypeId: string, steps: { role: ApproverRole; slaDays: number; note: string }[], defId?: string) => {
+      // Targeted edit when the UI names a definition; otherwise the type's
+      // ACTIVE definition (falling back to any), so multi-definition types
+      // always edit the chain that is actually routing.
+      const existing =
+        (defId ? workflowDefs.find((w) => w.id === defId) : undefined) ??
+        workflowDefs.find((w) => w.leaveTypeId === leaveTypeId && w.isActive !== false) ??
+        workflowDefs.find((w) => w.leaveTypeId === leaveTypeId)
       const typeName = typeOf(leaveTypeId)?.name ?? leaveTypeId
       void (async () => {
         if (existing) {
@@ -1380,6 +1925,55 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       })()
     },
     [workflowDefs, typeOf, loadWorkflows],
+  )
+
+  const createWorkflow = React.useCallback(
+    (input: { leaveTypeId: string; minDurationDays?: number; zoneId?: string | null; steps: { role: ApproverRole; slaDays: number; note: string }[] }) => {
+      const typeName = typeOf(input.leaveTypeId)?.name ?? input.leaveTypeId
+      void (async () => {
+        const res = await safe(
+          leaveApi.workflows.store({
+            leave_type_id: input.leaveTypeId,
+            min_duration_days: input.minDurationDays ?? 0,
+            zone_id: input.zoneId ?? null,
+            steps: input.steps.map((s) => ({ role_required: s.role, sla_days: s.slaDays, note: s.note })),
+          }),
+        )
+        if (!res) return
+        await safe(loadWorkflows())
+        toast.success(`${typeName} workflow v${res.data.version} created — new submissions route through it.`)
+      })()
+    },
+    [typeOf, loadWorkflows],
+  )
+
+  const setWorkflowActive = React.useCallback(
+    (workflowId: string, active: boolean) => {
+      const def = workflowDefs.find((w) => w.id === workflowId)
+      const label = def ? typeOf(def.leaveTypeId)?.name ?? def.leaveTypeId : 'Workflow'
+      void (async () => {
+        // 422 (e.g. the type's last active chain) surfaces via `safe`'s toast;
+        // local state only changes on success.
+        const res = await safe(leaveApi.workflows.update(workflowId, { is_active: active }))
+        if (!res) return
+        setWorkflowDefs((prev) => prev.map((w) => (w.id === workflowId ? { ...w, isActive: active } : w)))
+        toast.info(`${label} workflow ${active ? 'activated — new submissions will use it.' : 'deactivated — it no longer routes new submissions.'}`)
+      })()
+    },
+    [workflowDefs, typeOf],
+  )
+
+  const deleteWorkflow = React.useCallback(
+    async (workflowId: string): Promise<boolean> => {
+      const def = workflowDefs.find((w) => w.id === workflowId)
+      const label = def ? typeOf(def.leaveTypeId)?.name ?? def.leaveTypeId : 'Workflow'
+      const res = await safe(leaveApi.workflows.destroy(workflowId))
+      if (!res) return false
+      setWorkflowDefs((prev) => prev.filter((w) => w.id !== workflowId))
+      toast.success(`${label} workflow deleted.`)
+      return true
+    },
+    [workflowDefs, typeOf],
   )
 
   const saveRolePermissions = React.useCallback(
@@ -1454,67 +2048,338 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
     [loadEmployees],
   )
 
-  const addZone = React.useCallback((input: Omit<CustomZoneConfig, 'id'>) => {
-    const id = `z_c_${Date.now().toString(36)}`
-    setCustomZones((prev) => [...prev, { ...input, id }])
-    toast.success(`Zone "${input.name}" created.`)
-  }, [])
+  const addZone = React.useCallback(
+    async (input: Omit<CustomZoneConfig, 'id'>): Promise<boolean> => {
+      if (!hasPerm('admin.create')) {
+        toast.error('You do not have permission to create zones.')
+        return false
+      }
+      const res = await safe(
+        leaveApi.org.storeZone({
+          name: input.name,
+          short: input.short ?? null,
+          is_hq: input.isHQ,
+          is_pemba: input.isPemba,
+          is_coordination: input.isCoordination,
+        }),
+      )
+      if (!res) return false
+      setZoneOverrides((prev) => ({
+        ...prev,
+        [res.data.id]: {
+          id: res.data.id,
+          name: res.data.name,
+          short: res.data.short ?? '',
+          isHQ: res.data.is_hq,
+          isPemba: res.data.is_pemba,
+          isCoordination: res.data.is_coordination,
+        },
+      }))
+      await safe(loadEmployees())
+      toast.success(`Zone "${res.data.name}" created.`)
+      return true
+    },
+    [hasPerm, loadEmployees],
+  )
 
-  const removeZone = React.useCallback((id: string) => {
-    setCustomZones((prev) => prev.filter((z) => z.id !== id))
-    setCustomDepartments((prev) => prev.filter((d) => d.zoneId !== id))
-    toast.info(`Zone ${id} removed.`)
-  }, [])
+  const updateZone = React.useCallback(
+    async (id: string, input: Partial<Omit<CustomZoneConfig, 'id'>>): Promise<boolean> => {
+      if (!hasPerm('admin.update')) {
+        toast.error('You do not have permission to edit zones.')
+        return false
+      }
+      const res = await safe(
+        leaveApi.org.updateZone(id, {
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.short !== undefined ? { short: input.short || null } : {}),
+          ...(input.isHQ !== undefined ? { is_hq: input.isHQ } : {}),
+          ...(input.isPemba !== undefined ? { is_pemba: input.isPemba } : {}),
+          ...(input.isCoordination !== undefined ? { is_coordination: input.isCoordination } : {}),
+        }),
+      )
+      if (!res) return false
+      setZoneOverrides((prev) => {
+        // Merge onto whatever is already known about this id, falling back to the
+        // seed, so a partial patch never blanks the untouched fields.
+        const seed = allZones.find((z) => z.id === id)
+        const base: CustomZoneConfig = prev[id] ?? {
+          id,
+          name: seed?.name ?? id,
+          short: seed?.short ?? '',
+          isHQ: seed?.isHQ,
+          isPemba: seed?.isPemba,
+          isCoordination: seed?.isCoordination,
+        }
+        return { ...prev, [id]: { ...base, ...input, id } }
+      })
+      await safe(loadEmployees())
+      toast.success('Zone updated.')
+      return true
+    },
+    [hasPerm, loadEmployees],
+  )
 
-  const addDepartment = React.useCallback((input: Omit<CustomDeptConfig, 'id'>) => {
-    const id = `d_c_${Date.now().toString(36)}`
-    setCustomDepartments((prev) => [...prev, { ...input, id }])
-    toast.success(`Department "${input.name}" created.`)
-  }, [])
+  const removeZone = React.useCallback(
+    async (id: string): Promise<boolean> => {
+      if (!hasPerm('admin.delete')) {
+        toast.error('You do not have permission to delete zones.')
+        return false
+      }
+      try {
+        await leaveApi.org.deleteZone(id)
+      } catch (err) {
+        // 422 carries the reason: the zone still holds departments or employees.
+        toast.error(err instanceof ApiError ? err.message : `Failed to delete zone ${id}.`)
+        return false
+      }
+      // Tombstone the id so the seeded constant stops rendering, and drop any
+      // override so a later re-create of the same id is not shadowed by it.
+      setRemovedZoneIds((prev) => (prev.includes(id) ? prev : [...prev, id]))
+      setZoneOverrides((prev) => {
+        if (!(id in prev)) return prev
+        const { [id]: _dropped, ...rest } = prev
+        return rest
+      })
+      setDeptOverrides((prev) => {
+        const kept = Object.entries(prev).filter(([, d]) => d.zoneId !== id)
+        return kept.length === Object.keys(prev).length ? prev : Object.fromEntries(kept)
+      })
+      await safe(loadEmployees())
+      toast.info('Zone removed.')
+      return true
+    },
+    [hasPerm, loadEmployees],
+  )
 
-  const removeDepartment = React.useCallback((id: string) => {
-    setCustomDepartments((prev) => prev.filter((d) => d.id !== id))
-    toast.info(`Department ${id} removed.`)
-  }, [])
+  const addDepartment = React.useCallback(
+    async (input: Omit<CustomDeptConfig, 'id'>): Promise<boolean> => {
+      if (!hasPerm('admin.create')) {
+        toast.error('You do not have permission to create departments.')
+        return false
+      }
+      const res = await safe(leaveApi.org.storeDepartment({ name: input.name, zone_id: input.zoneId }))
+      if (!res) return false
+      setDeptOverrides((prev) => ({
+        ...prev,
+        [res.data.id]: { id: res.data.id, name: res.data.name, zoneId: res.data.zone_id ?? input.zoneId },
+      }))
+      await safe(loadEmployees())
+      toast.success(`Department "${res.data.name}" created.`)
+      return true
+    },
+    [hasPerm, loadEmployees],
+  )
 
-  const createRole = React.useCallback((input: { label: string; description: string }) => {
-    const label = input.label.trim()
-    const id = `role_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_${Date.now().toString(36)}`
-    setCustomRoles((prev) => [...prev, { id, label, description: input.description.trim() }])
-    setRolePermissions((prev) => ({ ...prev, [id]: {} }))
-    toast.success(`Role "${label}" created. Grant permissions in the matrix and assign holders.`)
-  }, [])
+  const updateDepartment = React.useCallback(
+    async (id: string, input: Partial<Omit<CustomDeptConfig, 'id'>>): Promise<boolean> => {
+      if (!hasPerm('admin.update')) {
+        toast.error('You do not have permission to edit departments.')
+        return false
+      }
+      const res = await safe(
+        leaveApi.org.updateDepartment(id, {
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.zoneId !== undefined ? { zone_id: input.zoneId } : {}),
+        }),
+      )
+      if (!res) return false
+      setDeptOverrides((prev) => {
+        const seed = allDepts.find((d) => d.id === id)
+        const base: CustomDeptConfig = prev[id] ?? {
+          id,
+          name: seed?.name ?? id,
+          zoneId: seed?.zoneId ?? input.zoneId ?? '',
+        }
+        return { ...prev, [id]: { ...base, ...input, id } }
+      })
+      await safe(loadEmployees())
+      toast.success('Department updated.')
+      return true
+    },
+    [hasPerm, loadEmployees],
+  )
 
-  const updateRole = React.useCallback((roleId: string, patch: Partial<Pick<CustomRoleConfig, 'label' | 'description'>>) => {
-    setCustomRoles((prev) => prev.map((r) => (r.id === roleId ? { ...r, ...patch } : r)))
-    toast.success('Role updated.')
-  }, [])
+  const removeDepartment = React.useCallback(
+    async (id: string): Promise<boolean> => {
+      if (!hasPerm('admin.delete')) {
+        toast.error('You do not have permission to delete departments.')
+        return false
+      }
+      try {
+        await leaveApi.org.deleteDepartment(id)
+      } catch (err) {
+        toast.error(err instanceof ApiError ? err.message : `Failed to delete department ${id}.`)
+        return false
+      }
+      setRemovedDeptIds((prev) => (prev.includes(id) ? prev : [...prev, id]))
+      setDeptOverrides((prev) => {
+        if (!(id in prev)) return prev
+        const { [id]: _dropped, ...rest } = prev
+        return rest
+      })
+      await safe(loadEmployees())
+      toast.info('Department removed.')
+      return true
+    },
+    [hasPerm, loadEmployees],
+  )
 
-  const deleteRole = React.useCallback((roleId: string) => {
-    setCustomRoles((prev) => prev.filter((r) => r.id !== roleId))
-    setRolePermissions((prev) => {
-      const next = { ...prev }
-      delete next[roleId]
-      return next
-    })
-    setCustomRoleAssignments((prev) =>
-      Object.fromEntries(Object.entries(prev).map(([eid, roles]) => [eid, roles.filter((r) => r !== roleId)])),
-    )
-    toast.info(`Role ${roleId} removed.`)
-  }, [])
+  const setDepartmentHead = React.useCallback(
+    async (departmentId: string, employeeId: string): Promise<boolean> => {
+      if (!hasPerm('admin.update')) {
+        toast.error('You do not have permission to appoint department heads.')
+        return false
+      }
+      const res = await safe(leaveApi.org.setDepartmentHead(departmentId, employeeId))
+      if (!res) return false
+      await safe(loadOrgHeads())
+      await safe(loadEmployees())
+      toast.success('Department head updated.')
+      return true
+    },
+    [hasPerm, loadOrgHeads, loadEmployees],
+  )
 
-  const assignCustomRole = React.useCallback((empId: string, roleId: string, on: boolean) => {
-    setCustomRoleAssignments((prev) => {
-      const cur = prev[empId] ?? []
-      const next = on ? (cur.includes(roleId) ? cur : [...cur, roleId]) : cur.filter((r) => r !== roleId)
-      return { ...prev, [empId]: next }
-    })
-    const empName = getEmployee(empId).name
-    toast.success(`${on ? 'Assigned' : 'Removed'} role — ${empName}.`)
-  }, [])
+  const clearDepartmentHead = React.useCallback(
+    async (departmentId: string): Promise<boolean> => {
+      if (!hasPerm('admin.update')) {
+        toast.error('You do not have permission to appoint department heads.')
+        return false
+      }
+      const res = await safe(leaveApi.org.clearDepartmentHead(departmentId))
+      if (!res) return false
+      await safe(loadOrgHeads())
+      await safe(loadEmployees())
+      toast.success('Department head cleared.')
+      return true
+    },
+    [hasPerm, loadOrgHeads, loadEmployees],
+  )
+
+  const setZoneHead = React.useCallback(
+    async (zoneId: string, employeeId: string): Promise<boolean> => {
+      if (!hasPerm('admin.update')) {
+        toast.error('You do not have permission to appoint zonal heads.')
+        return false
+      }
+      const res = await safe(leaveApi.org.setZoneHead(zoneId, employeeId))
+      if (!res) return false
+      await safe(loadOrgHeads())
+      await safe(loadEmployees())
+      toast.success('Zonal head updated.')
+      return true
+    },
+    [hasPerm, loadOrgHeads, loadEmployees],
+  )
+
+  const clearZoneHead = React.useCallback(
+    async (zoneId: string): Promise<boolean> => {
+      if (!hasPerm('admin.update')) {
+        toast.error('You do not have permission to appoint zonal heads.')
+        return false
+      }
+      const res = await safe(leaveApi.org.clearZoneHead(zoneId))
+      if (!res) return false
+      await safe(loadOrgHeads())
+      await safe(loadEmployees())
+      toast.success('Zonal head cleared.')
+      return true
+    },
+    [hasPerm, loadOrgHeads, loadEmployees],
+  )
+
+  /**
+   * Dynamic roles live in the backend `roles` table — these three used to be
+   * local React state only, which made every role vanish on reload. Writes go
+   * through the API and re-read the authoritative list afterwards.
+   */
+  const createRole = React.useCallback(
+    async (input: { label: string; description: string }): Promise<boolean> => {
+      const label = input.label.trim()
+      if (!label) return false
+
+      const res = await safe(leaveApi.roles.store({
+        name: label,
+        description: input.description.trim() || null,
+      }))
+      if (!res) return false
+
+      await safe(loadRolesAndPermissions())
+      toast.success(`Role "${res.data.name}" created. Grant permissions in the matrix and assign holders.`)
+      return true
+    },
+    [loadRolesAndPermissions],
+  )
+
+  const updateRole = React.useCallback(
+    async (roleId: string, patch: Partial<Pick<CustomRoleConfig, 'label' | 'description'>>): Promise<boolean> => {
+      const res = await safe(leaveApi.roles.update(roleId, {
+        ...(patch.label !== undefined ? { name: patch.label.trim() } : {}),
+        ...(patch.description !== undefined ? { description: patch.description.trim() || null } : {}),
+      }))
+      if (!res) return false
+
+      await safe(loadRolesAndPermissions())
+      toast.success('Role updated.')
+      return true
+    },
+    [loadRolesAndPermissions],
+  )
+
+  const deleteRole = React.useCallback(
+    async (roleId: string, reassignTo?: string): Promise<'deleted' | 'blocked' | 'failed'> => {
+      if (!hasPerm('admin.delete')) {
+        toast.error('You do not have permission to delete roles.')
+        return 'failed'
+      }
+
+      try {
+        await leaveApi.roles.destroy(roleId, reassignTo)
+      } catch (err) {
+        // 422 carries the reason. A refusal with `errors.role` means live
+        // workflow steps still point at this role — the UI turns that into a
+        // reassignment offer rather than a dead end.
+        if (err instanceof ApiError && err.status === 422 && err.fieldErrors?.role) {
+          toast.error(err.message)
+          return 'blocked'
+        }
+        toast.error(err instanceof ApiError ? err.message : `Failed to delete role ${roleId}.`)
+        return 'failed'
+      }
+
+      await safe(loadRolesAndPermissions())
+      await safe(loadEmployees())
+      syncCustomRoleAssignments(employeesRef.current)
+      toast.info(
+        reassignTo
+          ? `Role ${roleId} archived — its approval steps now route to ${reassignTo}.`
+          : `Role ${roleId} deleted — its holders and delegations were removed with it.`,
+      )
+      return 'deleted'
+    },
+    [hasPerm, loadRolesAndPermissions, loadEmployees, syncCustomRoleAssignments],
+  )
+
+  const assignCustomRole = React.useCallback(
+    async (empId: string, roleId: string, on: boolean): Promise<boolean> => {
+      const empName = getEmployee(empId)?.name ?? empId
+
+      // Single-grant endpoints: a full role_ids PATCH would rewrite every
+      // unscoped grant and re-materialise scoped department/zonal ones.
+      const res = await safe(on ? leaveApi.org.grantRole(empId, roleId) : leaveApi.org.revokeRole(empId, roleId))
+      if (!res) return false
+
+      await safe(loadEmployees())
+      syncCustomRoleAssignments(employeesRef.current)
+      toast.success(`${on ? 'Assigned' : 'Removed'} role — ${empName}.`)
+      return true
+    },
+    [loadEmployees, syncCustomRoleAssignments],
+  )
 
   const positionTitle = React.useCallback(
-    (id: string) => positions.find((p) => p.id === id)?.title ?? getPosition(id).title,
+    (id: string) =>
+      positions.find((p) => p.id === id)?.title ?? getPosition(id)?.title ?? '—',
     [positions],
   )
 
@@ -1574,16 +2439,6 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
     return false
   }, [])
 
-  const resetData = React.useCallback(() => {
-    setCustomZones([])
-    setCustomDepartments([])
-    setCustomRoles([])
-    setCustomRoleAssignments({})
-    setRolePermissions(JSON.parse(JSON.stringify(SEED_ROLE_PERMISSIONS)))
-    refreshAfterWrite()
-    toast.info('Demo data reset to backend state.')
-  }, [refreshAfterWrite])
-
   if (mounted && loading && status === 'authenticated') {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-3 bg-background">
@@ -1605,8 +2460,10 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         updatePosition,
         deletePosition,
         supervisorMode,
+        access,
         setEmployee: setEmployeeId,
-        toggleSupervisor: () => setSupervisorMode((v) => !v),
+        canViewEmployee,
+        rolesOf,
         requests,
         notifications,
         delegations,
@@ -1616,14 +2473,17 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         caseOf: (requestId: string) => caseFor(requestId, cases),
         policies,
         leaveTypes,
+        annualTypeId,
         workflowDefs,
         rolePermissions,
         roleNames,
+        roleDescriptions,
         permissionModules,
         permissionActions,
         permissionCodes,
         validPermissionCodes,
         can,
+        hasPerm,
         pendingApprovals,
         activeRequests,
         typeOf,
@@ -1635,6 +2495,8 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         decide,
         resubmit,
         withdrawRequest,
+        submitDraft,
+        deleteDraft,
         createDelegation,
         revokeDelegation,
         setDelegationActive,
@@ -1649,24 +2511,38 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         deleteDocument,
         updateEmployee,
         toggleEmployeeActive,
+        deleteEmployee,
         registerEmployee,
         createLeaveType,
         updateLeaveType,
+        deleteLeaveType,
         updateWorkflow,
+        createWorkflow,
+        setWorkflowActive,
+        deleteWorkflow,
         saveRolePermissions,
         customZones,
         customDepartments,
+        allZones,
+        allDepts,
         customRoles,
         customRoleAssignments,
         addZone,
+        updateZone,
         removeZone,
         addDepartment,
+        updateDepartment,
         removeDepartment,
         createRole,
         updateRole,
         deleteRole,
         assignCustomRole,
-        resetData,
+        deptHeads,
+        zoneHeads,
+        setDepartmentHead,
+        clearDepartmentHead,
+        setZoneHead,
+        clearZoneHead,
       }}
     >
       {children}

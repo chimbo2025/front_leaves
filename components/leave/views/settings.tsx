@@ -1,13 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { Fragment, useState, useEffect } from 'react'
 import {
   Building2,
   MapPin,
   Users,
   ShieldCheck,
   Lock,
-  RotateCcw,
   Eye,
   Pencil,
   Power,
@@ -23,14 +22,11 @@ import {
   UserPlus,
   Briefcase,
   Sparkles,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
-  ZONES,
-  DEPARTMENTS,
-  POSITIONS,
-  EMPLOYEES,
-  EMPLOYEE_ROLES,
   roleLabels,
   getDept,
   getZone,
@@ -44,7 +40,7 @@ import {
   ROLE_PERMISSION_ACTIONS,
   ROLE_PERMISSION_CODE_META,
 } from '@/components/leave/leave-context'
-import type { PositionDto } from '@/lib/leave-api'
+import { leaveApi, type PositionDto, type DivisionDto, type UnitDto } from '@/lib/leave-api'
 import {
   SectionHeading,
   Panel,
@@ -55,6 +51,7 @@ import {
   ConfirmModal,
   TextInput,
   SelectInput,
+  MultiSelect,
   StatCard,
   Btn,
   Pagination,
@@ -79,14 +76,23 @@ function RowAvatar({ e, size = 'sm' }: { e: EmployeeRow; size?: 'sm' | 'md' | 'l
   )
 }
 
+/** Initial passwords offered at registration. Each one satisfies the backend
+ *  rule (min 8 chars, upper + lower + digit) — the old `password` /
+ *  `password123` presets were rejected with a 422 on save. */
+const PASSWORD_PRESETS = ['Password123', 'Password1', 'ChangeMe1', 'Welcome2026']
+
+function passwordIsValid(value: string): boolean {
+  return value.length >= 8 && /[a-z]/.test(value) && /[A-Z]/.test(value) && /\d/.test(value)
+}
+
 export function SettingsView() {
   const {
-    resetData,
     supervisorMode,
     employee,
     employees,
     updateEmployee,
     toggleEmployeeActive,
+    deleteEmployee,
     registerEmployee,
     rolePermissions,
     permissionModules,
@@ -100,8 +106,10 @@ export function SettingsView() {
     customRoles,
     customRoleAssignments,
     addZone,
+    updateZone,
     removeZone,
     addDepartment,
+    updateDepartment,
     removeDepartment,
     createRole,
     updateRole,
@@ -113,9 +121,48 @@ export function SettingsView() {
     updatePosition,
     deletePosition,
     roleNames,
+    roleDescriptions,
+    allZones,
+    allDepts,
+    rolesOf,
   } = useLeave()
   const [tab, setTab] = useState('staff')
   const [orgTab, setOrgTab] = useState('zones')
+
+  // Load divisions and units for the new tabs
+  useEffect(() => {
+    void (async () => {
+      try { const r = await leaveApi.org.divisions(); setDivisions(r.data); } catch {}
+      try { const r = await leaveApi.org.units(); setUnits(r.data); } catch {}
+    })()
+  }, [])
+
+  const saveDiv = async () => {
+    if (!divDraft.name.trim()) return
+    if (divEditId) {
+      await leaveApi.org.updateDivision(divEditId, { name: divDraft.name.trim(), parent_department_id: divDraft.parent_department_id || null, zone_id: divDraft.zone_id || null, unit_type: divDraft.unit_type, reports_directly_to_leadership: divDraft.reports_directly_to_leadership })
+      setDivEditId(null)
+    } else {
+      await leaveApi.org.storeDivision({ name: divDraft.name.trim(), parent_department_id: divDraft.parent_department_id || null, zone_id: divDraft.zone_id || null, unit_type: divDraft.unit_type, reports_directly_to_leadership: divDraft.reports_directly_to_leadership })
+    }
+    setDivDraft({ name: '', parent_department_id: null, zone_id: '', unit_type: 'division', reports_directly_to_leadership: false })
+    setDivOpen(false)
+    try { const r = await leaveApi.org.divisions(); setDivisions(r.data); } catch {}
+  }
+
+  const saveUnit = async () => {
+    if (!unitDraft.name.trim()) return
+    if (unitEditId) {
+      await leaveApi.org.updateUnit(unitEditId, { name: unitDraft.name.trim(), parent_department_id: unitDraft.parent_department_id || null, zone_id: unitDraft.zone_id || null, unit_type: unitDraft.unit_type, reports_directly_to_leadership: unitDraft.reports_directly_to_leadership })
+      setUnitEditId(null)
+    } else {
+      await leaveApi.org.storeUnit({ name: unitDraft.name.trim(), parent_department_id: unitDraft.parent_department_id || null, zone_id: unitDraft.zone_id || null, unit_type: unitDraft.unit_type, reports_directly_to_leadership: unitDraft.reports_directly_to_leadership })
+    }
+    setUnitDraft({ name: '', parent_department_id: null, zone_id: '', unit_type: 'unit', reports_directly_to_leadership: false })
+    setUnitOpen(false)
+    try { const r = await leaveApi.org.units(); setUnits(r.data); } catch {}
+  }
+
   const [permTab, setPermTab] = useState('matrix')
 
   const [zoneFilter, setZoneFilter] = useState('all')
@@ -125,21 +172,42 @@ export function SettingsView() {
   const [editTarget, setEditTarget] = useState<EmployeeRow | null>(null)
   const [editDraft, setEditDraft] = useState({ title: '', email: '', payrollNo: '', positionId: '', departmentId: '', zoneId: '', gender: 'M' as 'M' | 'F', hireDate: '', roleIds: [] as string[], password: '' })
   const [toggleTarget, setToggleTarget] = useState<EmployeeRow | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<EmployeeRow | null>(null)
   const [matrixRole, setMatrixRole] = useState('HR')
   const [matrixDraft, setMatrixDraft] = useState<Record<string, Record<string, string[]>> | null>(null)
+  /** Module rows the admin has opened in the matrix table (accordion). */
+  const [openModules, setOpenModules] = useState<Set<string>>(new Set())
+  const [matrixPage, setMatrixPage] = useState(1)
+  const [matrixPageSize, setMatrixPageSize] = useState(5)
+  /** Set when a role delete is refused because workflows still reference it —
+   *  the modal then offers to hand those steps to another role instead. */
+  const [roleReassign, setRoleReassign] = useState<{ id: string; steps: number } | null>(null)
+  const [roleReassignTarget, setRoleReassignTarget] = useState('FINAL_AUTHORITY')
 
   const [zoneOpen, setZoneOpen] = useState(false)
   const [zoneDraft, setZoneDraft] = useState({ name: '', short: '', isHQ: false, isPemba: false, isCoordination: false })
+  const [zoneEditId, setZoneEditId] = useState<string | null>(null)
   const [zoneDelete, setZoneDelete] = useState<string | null>(null)
   const [deptOpen, setDeptOpen] = useState(false)
-  const [deptDraft, setDeptDraft] = useState({ name: '', zoneId: 'z1' })
+  const [deptDraft, setDeptDraft] = useState({ name: '', zoneId: '' })
+  const [deptEditId, setDeptEditId] = useState<string | null>(null)
   const [deptDelete, setDeptDelete] = useState<string | null>(null)
+  const [divisions, setDivisions] = useState<DivisionDto[]>([])
+  const [units, setUnits] = useState<UnitDto[]>([])
+  const [divOpen, setDivOpen] = useState(false)
+  const [divDraft, setDivDraft] = useState({ name: '', parent_department_id: '' as string | null, zone_id: '', unit_type: 'division', reports_directly_to_leadership: false })
+  const [divEditId, setDivEditId] = useState<string | null>(null)
+  const [divDelete, setDivDelete] = useState<string | null>(null)
+  const [unitOpen, setUnitOpen] = useState(false)
+  const [unitDraft, setUnitDraft] = useState({ name: '', parent_department_id: '' as string | null, zone_id: '', unit_type: 'unit', reports_directly_to_leadership: false })
+  const [unitEditId, setUnitEditId] = useState<string | null>(null)
+  const [unitDelete, setUnitDelete] = useState<string | null>(null)
   const [posOpen, setPosOpen] = useState(false)
   const [posBusy, setPosBusy] = useState(false)
   const [posEdit, setPosEdit] = useState<PositionDto | null>(null)
   const [posDelete, setPosDelete] = useState<PositionDto | null>(null)
   const [posDeptFilter, setPosDeptFilter] = useState('all')
-  const [posDraft, setPosDraft] = useState({ title: '', departmentId: 'd2', tier: 1, isFinalAuthority: false, defaultRoleIds: [] as string[] })
+  const [posDraft, setPosDraft] = useState({ title: '', departmentId: '', tier: 1, isFinalAuthority: false, defaultRoleIds: [] as string[] })
   const [roleOpen, setRoleOpen] = useState(false)
   const [roleDraft, setRoleDraft] = useState({ label: '', description: '' })
   const [roleEdit, setRoleEdit] = useState<{ id: string; label: string; description: string } | null>(null)
@@ -152,23 +220,22 @@ export function SettingsView() {
     payroll_no: '',
     email: '',
     username: '',
-    password: 'password',
-    position_id: 'p8',
-    department_id: 'd2',
-    zone_id: 'z1',
+    password: 'Password123',
+    passwordCustom: false,
+    position_id: '',
+    department_id: '',
+    division_id: '',
+    unit_id: '',
+    zone_id: '',
     gender: 'M' as 'M' | 'F',
     hire_date: '',
-    supervisor_employee_id: '',
     role_ids: [] as string[],
   })
 
   const scopeZone = supervisorMode ? 'all' : employee.zoneId
   const canManage = supervisorMode || can('admin', 'create')
 
-  const allZones = [...ZONES, ...customZones]
-  const allDepts = [...DEPARTMENTS, ...customDepartments]
-
-  const zoneName = (id: string) => ZONES.find((z) => z.id === id)?.name ?? allZones.find((z) => z.id === id)?.name ?? id
+  const zoneName = (id: string) => allZones.find((z) => z.id === id)?.name ?? id
 
   const roleName = (role: string): string => {
     const key =
@@ -177,10 +244,12 @@ export function SettingsView() {
         : typeof role === 'object' && role !== null
           ? String((role as Record<string, unknown>).role_id ?? (role as Record<string, unknown>).roleId ?? (role as Record<string, unknown>).position_id ?? '')
           : String(role ?? '')
+    // Backend `roles.name` is authoritative; the static labels are only a
+    // pre-hydration fallback for the built-ins.
     return (
-      roleLabels[key as ApproverRole] ??
       customRoles.find((c) => c.id === key)?.label ??
       roleNames[key] ??
+      roleLabels[key as ApproverRole] ??
       key
     )
   }
@@ -197,15 +266,7 @@ export function SettingsView() {
     return role == null ? '' : String(role)
   }
 
-  const positionOptions = positions.length > 0 ? positions : POSITIONS.map((p) => ({
-    id: p.id,
-    title: p.title,
-    department_id: p.departmentId,
-    zone_id: null,
-    tier: p.tier,
-    is_final_authority: p.isFinalAuthority ?? false,
-    default_roles: [] as string[],
-  }))
+  const positionOptions = positions.length > 0 ? positions : []
 
   const allRoleIds = [
     ...Object.keys(roleLabels).filter((id) => id in rolePermissions),
@@ -223,8 +284,8 @@ export function SettingsView() {
       e.name.toLowerCase().includes(q) ||
       (e.payrollNo ?? '').toLowerCase().includes(q) ||
       e.title.toLowerCase().includes(q) ||
-      (EMPLOYEE_ROLES[e.id] ?? []).some((r) => roleLabels[r].toLowerCase().includes(q)) ||
-      (e.roleIds ?? []).some((r) => (roleLabels[r as ApproverRole] ?? r).toLowerCase().includes(q))
+      (rolesOf(e.id) ?? []).some((r) => roleName(r).toLowerCase().includes(q)) ||
+      (e.roleIds ?? []).some((r) => roleName(r).toLowerCase().includes(q))
     )
   })
   const paged = usePaged(staff, 9)
@@ -239,13 +300,23 @@ export function SettingsView() {
 
   const buildMenu = (e: EmployeeRow): RowMenuItem[] => [
     { icon: Eye, label: 'View profile', onClick: () => setViewTarget(e) },
-    { icon: Pencil, label: 'Edit profile', onClick: () => { setEditTarget(e); setEditDraft({ title: e.title, email: e.email, payrollNo: e.payrollNo, positionId: e.positionId, departmentId: e.departmentId, zoneId: e.zoneId, gender: e.gender ?? 'M', hireDate: e.hireDate, roleIds: [...(e.roleIds ?? [])], password: '' }) } },
+    { icon: Pencil, label: 'Edit profile', onClick: () => { setEditTarget(e); setEditDraft({ title: e.title, email: e.email, payrollNo: e.payrollNo, positionId: e.positionId, departmentId: e.departmentId, zoneId: e.zoneId, gender: e.gender ?? 'M', hireDate: e.hireDate, roleIds: [...new Set(e.roleIds ?? [])], password: '' }) } },
     {
       icon: Power,
       label: e.active ? 'Deactivate' : 'Activate',
       tone: e.active ? 'danger' : 'default',
       onClick: () => setToggleTarget(e),
     },
+    ...(canManage && e.id !== employee.id
+      ? [
+          {
+            icon: Trash2,
+            label: 'Delete permanently',
+            tone: 'danger' as const,
+            onClick: () => setDeleteTarget(e),
+          },
+        ]
+      : []),
   ]
 
   const saveEdit = () => {
@@ -268,21 +339,31 @@ export function SettingsView() {
 
   const saveZone = () => {
     if (!zoneDraft.name.trim() || !zoneDraft.short.trim()) return
-    addZone(zoneDraft)
+    if (zoneEditId) {
+      void updateZone(zoneEditId, { ...zoneDraft, name: zoneDraft.name.trim(), short: zoneDraft.short.trim() })
+      setZoneEditId(null)
+    } else {
+      void addZone({ ...zoneDraft, name: zoneDraft.name.trim(), short: zoneDraft.short.trim() })
+    }
     setZoneDraft({ name: '', short: '', isHQ: false, isPemba: false, isCoordination: false })
     setZoneOpen(false)
   }
 
   const saveDept = () => {
     if (!deptDraft.name.trim()) return
-    addDepartment(deptDraft)
-    setDeptDraft({ name: '', zoneId: 'z1' })
+    if (deptEditId) {
+      void updateDepartment(deptEditId, { name: deptDraft.name.trim(), zoneId: deptDraft.zoneId })
+      setDeptEditId(null)
+    } else {
+      void addDepartment({ name: deptDraft.name.trim(), zoneId: deptDraft.zoneId })
+    }
+    setDeptDraft({ name: '', zoneId: allZones[0]?.id ?? '' })
     setDeptOpen(false)
   }
 
   const openPosCreate = () => {
     setPosEdit(null)
-    setPosDraft({ title: '', departmentId: 'd2', tier: 1, isFinalAuthority: false, defaultRoleIds: [] })
+    setPosDraft({ title: '', departmentId: allDepts[0]?.id ?? '', tier: 1, isFinalAuthority: false, defaultRoleIds: [] })
     setPosOpen(true)
   }
 
@@ -290,7 +371,7 @@ export function SettingsView() {
     setPosEdit(p)
     setPosDraft({
       title: p.title,
-      departmentId: p.department_id ?? 'd2',
+      departmentId: p.department_id ?? allDepts[0]?.id ?? '',
       tier: p.tier ?? 1,
       isFinalAuthority: p.is_final_authority,
       defaultRoleIds: [...(p.default_roles ?? [])],
@@ -326,11 +407,60 @@ export function SettingsView() {
     setRoleEdit(null)
   }
 
-  const toggleRegRole = (roleId: string, on: boolean) => {
-    setRegDraft((d) => ({ ...d, role_ids: on ? (d.role_ids.includes(roleId) ? d.role_ids : [...d.role_ids, roleId]) : d.role_ids.filter((r) => r !== roleId) }))
+  /** Seed the draft from live org data — no hardcoded zone/department/position ids. */
+  const seedRegDraft = () => {
+    const zoneId = allZones[0]?.id ?? ''
+    const zoneDepts = zoneId ? allDepts.filter((d) => d.zoneId === zoneId) : allDepts
+    const deptId = (zoneDepts.find((d) => !d.parentId) ?? zoneDepts[0])?.id ?? ''
+    const divisionId = zoneDepts.find((d) => d.parentId === deptId)?.id ?? ''
+    const unitId = zoneDepts.find((d) => d.parentId === divisionId)?.id ?? ''
+    const pathIds = new Set([deptId, divisionId, unitId].filter(Boolean))
+    const posId = positionOptions.find((p) => !p.department_id || pathIds.has(p.department_id))?.id ?? positionOptions[0]?.id ?? ''
+    setRegDraft({
+      full_name: '',
+      payroll_no: '',
+      email: '',
+      username: '',
+      password: 'Password123',
+      passwordCustom: false,
+      position_id: posId,
+      department_id: deptId,
+      division_id: divisionId,
+      unit_id: unitId,
+      zone_id: zoneId,
+      gender: 'M',
+      hire_date: '',
+      role_ids: [],
+    })
   }
 
-  const canRegister = canManage && regDraft.full_name.trim() && regDraft.username.trim() && regDraft.password.trim() && regDraft.hire_date
+  const openRegister = () => {
+    seedRegDraft()
+    setRegOpen(true)
+  }
+
+  // Zone → department → division → unit. Employees only store one org unit id
+  // on the backend (department_id), so the deepest chosen level is sent.
+  const regZoneDepts = allDepts.filter((d) => d.zoneId === regDraft.zone_id)
+  const rootRegDepts = regZoneDepts.filter((d) => !d.parentId || d.unitType === 'department')
+  const regDepartments = rootRegDepts.length ? rootRegDepts : regZoneDepts
+  const regDivisions = regZoneDepts.filter((d) => d.parentId === regDraft.department_id)
+  const regUnits = regZoneDepts.filter((d) => d.parentId === regDraft.division_id)
+  const regPlacementId = regDraft.unit_id || regDraft.division_id || regDraft.department_id
+  const regPathIds = new Set([regDraft.department_id, regDraft.division_id, regDraft.unit_id].filter(Boolean))
+  const regPositions = positionOptions.filter((p) => !p.department_id || regPathIds.has(p.department_id))
+
+  const canRegister = Boolean(
+    canManage &&
+    regDraft.full_name.trim() &&
+    regDraft.email.trim() &&
+    regDraft.username.trim() &&
+    passwordIsValid(regDraft.password) &&
+    regDraft.hire_date &&
+    regDraft.position_id &&
+    regPlacementId &&
+    regDraft.zone_id,
+  )
 
   const saveRegister = () => {
     if (!canRegister || !regDraft.hire_date) return
@@ -341,19 +471,18 @@ export function SettingsView() {
       username: regDraft.username.trim(),
       password: regDraft.password,
       position_id: regDraft.position_id,
-      department_id: regDraft.department_id,
+      department_id: regPlacementId,
       zone_id: regDraft.zone_id,
       gender: regDraft.gender,
       hire_date: regDraft.hire_date,
       role_ids: regDraft.role_ids.length ? regDraft.role_ids : undefined,
-      supervisor_employee_id: regDraft.supervisor_employee_id || undefined,
     }
     setRegBusy(true)
     void registerEmployee(payload).then((created) => {
       setRegBusy(false)
       if (created) {
         setRegOpen(false)
-        setRegDraft({ full_name: '', payroll_no: '', email: '', username: '', password: 'password', position_id: 'p8', department_id: 'd2', zone_id: 'z1', gender: 'M', hire_date: '', supervisor_employee_id: '', role_ids: [] })
+        seedRegDraft()
       }
     })
   }
@@ -362,19 +491,14 @@ export function SettingsView() {
     <div className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-8 py-6 space-y-6">
       <SectionHeading
         title="Admin & organisation"
-        subtitle="Zones, departments, staff, approval roles and the permission matrix. Regional offices only access staff and requests within their own zone unless central permission is granted."
-        actions={
-          <Btn variant="outline" onClick={resetData}>
-            <RotateCcw className="w-3.5 h-3.5" /> Reset demo data
-          </Btn>
-        }
+        subtitle="Admin settings — staff, org, roles and permissions."
       />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <StatCard icon={Users} label="Staff on file" value={employees.length} hint={`${employees.filter((e) => e.active).length} active`} tone="emerald" />
         <StatCard icon={Building2} label="Zones" value={allZones.length} hint={`${allDepts.length} departments`} tone="teal" />
         <StatCard icon={ShieldCheck} label="Approval roles" value={Object.keys(rolePermissions).length} hint={`${activeRoles} with permissions`} tone="violet" />
-        <StatCard icon={UserCheck} label="With approval role" value={new Set([...Object.values(EMPLOYEE_ROLES).flat(), ...employees.flatMap((e) => e.roleIds ?? []), ...Object.values(customRoleAssignments).flat()]).size} hint="holders across the office" tone="amber" />
+        <StatCard icon={UserCheck} label="With approval role" value={new Set(employees.flatMap((e) => e.roleIds ?? []).concat(Object.values(customRoleAssignments).flat())).size} hint="holders across the office" tone="amber" />
       </div>
 
       <Tabs
@@ -394,8 +518,8 @@ export function SettingsView() {
           subtitle={zoneFilter === 'all' ? 'All employees of the office' : `${zoneName(zoneFilter)} employees`}
           actions={
             canManage ? (
-              <Btn onClick={() => setRegOpen(true)}>
-                <UserPlus className="w-3.5 h-3.5" /> Register employee
+              <Btn onClick={openRegister}>
+                <UserPlus className="w-3.5 h-3.5" /> Add employee
               </Btn>
             ) : undefined
           }
@@ -441,7 +565,7 @@ export function SettingsView() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {paged.items.map((e) => {
-                    const roles = [...new Set(e.active ? [...(e.roleIds ?? []), ...(EMPLOYEE_ROLES[e.id] ?? []), ...(customRoleAssignments[e.id] ?? [])] : [])]
+                    const roles = [...new Set(e.active ? [...(e.roleIds ?? []), ...(rolesOf(e.id) ?? []), ...(customRoleAssignments[e.id] ?? [])] : [])]
                     return (
                       <tr key={e.id} className={cn('text-[13px] align-middle', !e.active && 'opacity-60')}>
                         <td className="py-3 px-5">
@@ -496,6 +620,8 @@ export function SettingsView() {
             tabs={[
               { value: 'zones', label: 'Zones', icon: MapPin, badge: allZones.length },
               { value: 'departments', label: 'Departments', icon: Building2, badge: depts.length },
+              { value: 'divisions', label: 'Divisions', icon: Network, badge: 0 },
+              { value: 'units', label: 'Units', icon: Users, badge: 0 },
               { value: 'separation', label: 'Regional data separation', icon: Lock },
             ]}
             value={orgTab}
@@ -508,7 +634,7 @@ export function SettingsView() {
               subtitle="Administrative regions of the DPP office — centrally registered, dynamically configured"
               actions={
                 canManage ? (
-                  <Btn onClick={() => setZoneOpen(true)}>
+                  <Btn onClick={() => { setZoneEditId(null); setZoneDraft({ name: '', short: '', isHQ: false, isPemba: false, isCoordination: false }); setZoneOpen(true) }}>
                     <Plus className="w-3.5 h-3.5" /> Add zone
                   </Btn>
                 ) : undefined
@@ -525,15 +651,25 @@ export function SettingsView() {
                         {z.isPemba && <span className="rounded-full bg-violet-600 text-white text-[10px] font-bold px-2 py-0.5">PEMBA</span>}
                         {z.isHQ && <span className="rounded-full bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-300 text-[10px] font-bold px-2 py-0.5">HQ</span>}
                         {custom && <span className="rounded-full bg-teal-600 text-white text-[10px] font-bold px-2 py-0.5">CUSTOM</span>}
-                        {custom && canManage && (
-                          <button
-                            type="button"
-                            onClick={() => setZoneDelete(z.id)}
-                            className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-border text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950 transition"
-                            aria-label={`Delete ${z.name}`}
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
+                        {canManage && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => { setZoneEditId(z.id); setZoneDraft({ name: z.name, short: z.short, isHQ: !!z.isHQ, isPemba: !!z.isPemba, isCoordination: !!z.isCoordination }); setZoneOpen(true) }}
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-border text-foreground hover:bg-card transition"
+                              aria-label={`Edit ${z.name}`}
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setZoneDelete(z.id)}
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-border text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950 transition"
+                              aria-label={`Delete ${z.name}`}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </>
                         )}
                       </div>
                       <p className="text-[11px] text-muted-foreground mt-1">
@@ -553,7 +689,7 @@ export function SettingsView() {
               subtitle="Operational units within the selected scope"
               actions={
                 canManage ? (
-                  <Btn onClick={() => setDeptOpen(true)}>
+                  <Btn onClick={() => { setDeptEditId(null); setDeptDraft({ name: '', zoneId: zoneFilter !== 'all' ? zoneFilter : allZones[0]?.id ?? '' }); setDeptOpen(true) }}>
                     <Plus className="w-3.5 h-3.5" /> Add department
                   </Btn>
                 ) : undefined
@@ -583,19 +719,103 @@ export function SettingsView() {
                         </p>
                         <p className="text-[10px] text-muted-foreground">{zoneName(d.zoneId)}</p>
                       </div>
-                      {custom && canManage && (
-                        <button
-                          type="button"
-                          onClick={() => setDeptDelete(d.id)}
-                          className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-border text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950 transition"
-                          aria-label={`Delete ${d.name}`}
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
+                      {canManage && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => { setDeptEditId(d.id); setDeptDraft({ name: d.name, zoneId: d.zoneId }); setDeptOpen(true) }}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-border text-foreground hover:bg-card transition"
+                            aria-label={`Edit ${d.name}`}
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeptDelete(d.id)}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-border text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950 transition"
+                            aria-label={`Delete ${d.name}`}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </>
                       )}
                     </div>
                   )
                 })}
+              </div>
+            </Panel>
+          )}
+
+          {orgTab === 'divisions' && (
+            <Panel
+              title={`Divisions (${divisions.length})`}
+              subtitle="Sub-departments — created based on zones and parent departments"
+              actions={
+                canManage ? (
+                  <Btn onClick={() => { setDivEditId(null); setDivDraft({ name: '', parent_department_id: null, zone_id: allZones[0]?.id ?? '', unit_type: 'division', reports_directly_to_leadership: false }); setDivOpen(true) }}>
+                    <Plus className="w-3.5 h-3.5" /> Add division
+                  </Btn>
+                ) : undefined
+              }
+            >
+              <div className="space-y-2.5 max-h-[520px] overflow-y-auto pr-1">
+                {divisions.map((d) => (
+                  <div key={d.id} className="flex items-center gap-2.5 rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2.5">
+                    <Network className="w-4 h-4 text-teal-700 flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[13px] font-medium text-foreground truncate">{d.name}</p>
+                      <p className="text-[10px] text-muted-foreground">Zone: {zoneName(d.zone_id || '') || '—'} · Parent: {allDepts.find((dept) => dept.id === d.parent_department_id)?.name || '—'}</p>
+                      <p className="text-[10px] text-muted-foreground">Type: {d.unit_type || 'division'} · Reports directly: {d.reports_directly_to_leadership ? 'Yes' : 'No'}</p>
+                    </div>
+                    {canManage && (
+                      <>
+                        <button type="button" onClick={() => { setDivEditId(d.id); setDivDraft({ name: d.name, parent_department_id: d.parent_department_id, zone_id: d.zone_id || allZones[0]?.id || '', unit_type: d.unit_type || 'division', reports_directly_to_leadership: d.reports_directly_to_leadership }); setDivOpen(true) }} className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-border text-foreground hover:bg-card transition" aria-label={`Edit ${d.name}`}>
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                        <button type="button" onClick={() => setDivDelete(d.id)} className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-border text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950 transition" aria-label={`Delete ${d.name}`}>
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          )}
+
+          {orgTab === 'units' && (
+            <Panel
+              title={`Units (${units.length})`}
+              subtitle="Sub-divisions — created based on zones, departments and parent divisions"
+              actions={
+                canManage ? (
+                  <Btn onClick={() => { setUnitEditId(null); setUnitDraft({ name: '', parent_department_id: null, zone_id: allZones[0]?.id ?? '', unit_type: 'unit', reports_directly_to_leadership: false }); setUnitOpen(true) }}>
+                    <Plus className="w-3.5 h-3.5" /> Add unit
+                  </Btn>
+                ) : undefined
+              }
+            >
+              <div className="space-y-2.5 max-h-[520px] overflow-y-auto pr-1">
+                {units.map((d) => (
+                  <div key={d.id} className="flex items-center gap-2.5 rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2.5">
+                    <Users className="w-4 h-4 text-teal-700 flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[13px] font-medium text-foreground truncate">{d.name}</p>
+                      <p className="text-[10px] text-muted-foreground">Zone: {zoneName(d.zone_id || '') || '—'} · Parent: {allDepts.find((dept) => dept.id === d.parent_department_id)?.name || '—'}</p>
+                      <p className="text-[10px] text-muted-foreground">Type: {d.unit_type || 'unit'} · Reports directly: {d.reports_directly_to_leadership ? 'Yes' : 'No'}</p>
+                    </div>
+                    {canManage && (
+                      <>
+                        <button type="button" onClick={() => { setUnitEditId(d.id); setUnitDraft({ name: d.name, parent_department_id: d.parent_department_id, zone_id: d.zone_id || allZones[0]?.id || '', unit_type: d.unit_type || 'unit', reports_directly_to_leadership: d.reports_directly_to_leadership }); setUnitOpen(true) }} className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-border text-foreground hover:bg-card transition" aria-label={`Edit ${d.name}`}>
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                        <button type="button" onClick={() => setUnitDelete(d.id)} className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-border text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950 transition" aria-label={`Delete ${d.name}`}>
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ))}
               </div>
             </Panel>
           )}
@@ -739,82 +959,195 @@ export function SettingsView() {
             onChange={setPermTab}
           />
 
-          {permTab === 'matrix' && (
-            <Panel
-              title="Permission matrix"
-              subtitle={`Actions each approval role can take per module — ${matrixDraft ? 'editing…' : `fetched from the backend (/roles), saved via PATCH /roles/{id}`}`}
-              actions={
-                matrixDraft ? (
-                  <div className="flex items-center gap-2">
-                    <Btn variant="ghost" onClick={() => setMatrixDraft(null)}>Cancel</Btn>
-                    <Btn onClick={saveMatrix}><Save className="w-3.5 h-3.5" /> Save permissions</Btn>
-                  </div>
-                ) : undefined
+          {permTab === 'matrix' && (() => {
+            const modules = permissionModules.length ? permissionModules : ROLE_PERMISSION_MODULES
+            const actions = permissionActions.length ? permissionActions : ROLE_PERMISSION_ACTIONS
+            const grantedCount = (role: string) =>
+              Object.entries(matrix[role] ?? {}).reduce(
+                (sum, [m, list]) => sum + list.filter((a) => validPermissionCodes.includes(`${m}.${a}`)).length,
+                0,
+              )
+            const validInModule = (m: string) => actions.filter((a) => validPermissionCodes.includes(`${m}.${a}`))
+            const onInModule = (m: string) => validInModule(m).filter((a) => (matrix[matrixRole]?.[m] ?? []).includes(a)).length
+            const allOnInModule = (m: string) => {
+              const valid = validInModule(m)
+              return valid.length > 0 && valid.every((a) => (matrix[matrixRole]?.[m] ?? []).includes(a))
+            }
+            const toggleModule = (m: string) => {
+              const valid = validInModule(m)
+              if (valid.length === 0) return
+              const turnOn = !allOnInModule(m)
+              // One staged write — togglePerm would restart from the same base
+              // on each loop iteration and only the last change would survive.
+              const next: Record<string, Record<string, string[]>> = JSON.parse(JSON.stringify(matrixDraft ?? rolePermissions))
+              const cur = next[matrixRole]?.[m] ?? []
+              next[matrixRole] = {
+                ...(next[matrixRole] ?? {}),
+                [m]: turnOn ? [...new Set([...cur, ...valid])] : cur.filter((a) => !valid.includes(a)),
               }
-            >
-              <div className="mb-4 max-w-xs">
-                <SelectInput label="Role" value={matrixRole} onChange={(e) => { setMatrixRole(e.target.value); setMatrixDraft(null) }}>
-                  {Object.keys(rolePermissions).map((role) => (
-                    <option key={role} value={role}>{roleName(role)}</option>
-                  ))}
-                </SelectInput>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                      <th className="py-3 px-4 font-semibold">Module</th>
-                      {(permissionActions.length ? permissionActions : ROLE_PERMISSION_ACTIONS).map((a) => (
-                        <th key={a} className="py-3 px-3 font-semibold text-center">{a}</th>
+              setMatrixDraft(next)
+            }
+            const toggleRow = (m: string) =>
+              setOpenModules((prev) => {
+                const next = new Set(prev)
+                if (next.has(m)) next.delete(m)
+                else next.add(m)
+                return next
+              })
+            const pages = Math.max(1, Math.ceil(modules.length / matrixPageSize))
+            const safePage = Math.min(matrixPage, pages)
+            const visibleModules = modules.slice((safePage - 1) * matrixPageSize, safePage * matrixPageSize)
+            return (
+              <Panel
+                title="Permission matrix"
+                subtitle="Grant each role the actions it can perform."
+                actions={
+                  matrixDraft ? (
+                    <div className="flex items-center gap-2">
+                      <Btn variant="ghost" onClick={() => setMatrixDraft(null)}>Discard</Btn>
+                      <Btn onClick={saveMatrix}><Save className="w-3.5 h-3.5" /> Save changes</Btn>
+                    </div>
+                  ) : undefined
+                }
+              >
+                {/* Role picker — a dropdown rather than a row of pills so the
+                    list stays usable as roles multiply. */}
+                <div className="mb-5 flex flex-wrap items-end gap-3">
+                  <div className="w-full max-w-xs">
+                    <SelectInput
+                      label="Role"
+                      value={matrixRole}
+                      onChange={(e) => { setMatrixRole(e.target.value); setMatrixDraft(null) }}
+                    >
+                      {Object.keys(rolePermissions).map((role) => (
+                        <option key={role} value={role}>
+                          {roleName(role)} ({grantedCount(role)} granted)
+                        </option>
                       ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {(permissionModules.length ? permissionModules : ROLE_PERMISSION_MODULES).map((m) => (
-                      <tr key={m} className="text-[13px]">
-                        <td className="py-3 px-4 font-semibold text-foreground capitalize">{m}</td>
-                        {(permissionActions.length ? permissionActions : ROLE_PERMISSION_ACTIONS).map((a) => {
-                          const code = `${m}.${a}`
-                          const valid = validPermissionCodes.includes(code)
-                          const on = (matrix[matrixRole]?.[m] ?? []).includes(a)
-                          return (
-                            <td key={a} className="py-3 px-3 text-center">
-                              {valid ? (
-                                <button
-                                  type="button"
-                                  onClick={() => togglePerm(m, a)}
-                                  className={cn(
-                                    'inline-flex h-6 w-6 items-center justify-center rounded-md border transition',
-                                    on ? 'bg-teal-700 text-white border-teal-700' : 'border-border bg-secondary text-transparent hover:text-muted-foreground',
-                                  )}
-                                  aria-label={`${m} ${a}`}
-                                >
-                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                                    <polyline points="20 6 9 17 4 12" />
-                                  </svg>
-                                </button>
-                              ) : (
-                                <span
-                                  className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-dashed border-border opacity-40"
-                                  aria-label={`${m} ${a} (not in catalog)`}
-                                />
-                              )}
-                            </td>
-                          )
-                        })}
+                    </SelectInput>
+                  </div>
+                  <p className="pb-2.5 text-[11px] text-muted-foreground">
+                    {matrixDraft ? 'Unsaved changes — press Save to apply.' : 'Changes apply to this role only.'}
+                  </p>
+                </div>
+
+                {/* Module table — one row per module, expandable to show its actions */}
+                <div className="overflow-x-auto rounded-xl border border-border">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-border bg-warm dark:bg-muted/30">
+                        <th className="py-2.5 pl-3 pr-2 w-8" />
+                        <th className="py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Module</th>
+                        <th className="py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground w-28">Granted</th>
+                        <th className="py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground w-32">All actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <p className="text-[11px] text-muted-foreground mt-3">Toggling a permission updates the runtime store immediately; the matrix itself is enforced during routing and menu rendering.</p>
-            </Panel>
-          )}
+                    </thead>
+                    <tbody>
+                      {visibleModules.map((m) => {
+                        const total = validInModule(m).length
+                        const on = onInModule(m)
+                        const allOn = allOnInModule(m)
+                        const expanded = openModules.has(m)
+                        return (
+                          <Fragment key={m}>
+                            <tr
+                              onClick={() => toggleRow(m)}
+                              className={cn('border-b border-border/60 cursor-pointer transition', expanded ? 'bg-teal-50/50 dark:bg-teal-950/20' : 'hover:bg-accent/50')}
+                            >
+                              <td className="py-2.5 pl-3 pr-2 text-muted-foreground">
+                                {expanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                              </td>
+                              <td className="py-2.5 px-2">
+                                <p className="text-[13px] font-semibold text-foreground capitalize">{m}</p>
+                                {total === 0 && <p className="text-[10px] text-muted-foreground">no grantable actions in catalog</p>}
+                              </td>
+                              <td className="py-2.5 px-2">
+                                {total > 0 ? (
+                                  <div className="flex items-center gap-2">
+                                    <div className="h-1.5 w-16 rounded-full bg-secondary overflow-hidden">
+                                      <div className="h-full rounded-full bg-teal-600 transition-all" style={{ width: `${(on / total) * 100}%` }} />
+                                    </div>
+                                    <span className="text-[11px] tabular-nums text-muted-foreground">{on} / {total}</span>
+                                  </div>
+                                ) : (
+                                  <span className="text-[11px] text-muted-foreground">—</span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-2">
+                                {total > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); toggleModule(m) }}
+                                    className={cn(
+                                      'rounded-full border px-2.5 py-1 text-[10px] font-semibold transition',
+                                      allOn
+                                        ? 'border-rose-200 bg-rose-50 text-rose-600 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-900'
+                                        : 'border-teal-200 bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300 dark:border-teal-900',
+                                    )}
+                                  >
+                                    {allOn ? 'Revoke all' : 'Grant all'}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                            {expanded && (
+                              <tr className="border-b border-border/60 bg-warm/60 dark:bg-muted/20">
+                                <td />
+                                <td colSpan={3} className="py-3 px-2">
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {actions.map((a) => {
+                                      const code = `${m}.${a}`
+                                      const valid = validPermissionCodes.includes(code)
+                                      if (!valid) return null
+                                      const isOn = (matrix[matrixRole]?.[m] ?? []).includes(a)
+                                      return (
+                                        <button
+                                          key={a}
+                                          type="button"
+                                          onClick={() => togglePerm(m, a)}
+                                          className={cn(
+                                            'inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium transition',
+                                            isOn
+                                              ? 'border-teal-700 bg-teal-700 text-white'
+                                              : 'border-border bg-card text-muted-foreground hover:text-foreground hover:border-teal-300',
+                                          )}
+                                          aria-pressed={isOn}
+                                          aria-label={`${m}.${a}`}
+                                        >
+                                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={isOn ? 'opacity-100' : 'opacity-0'}>
+                                            <polyline points="20 6 9 17 4 12" />
+                                          </svg>
+                                          {a}
+                                        </button>
+                                      )
+                                    })}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                  <Pagination
+                    page={safePage}
+                    pageSize={matrixPageSize}
+                    total={modules.length}
+                    onPage={setMatrixPage}
+                    onPageSize={(s) => { setMatrixPageSize(s); setMatrixPage(1) }}
+                    pageSizeOptions={[5, 10, 20]}
+                  />
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-3">Click a module row to open its capability list; changes are staged until you press Save, which writes the whole matrix for this role in one request.</p>
+              </Panel>
+            )
+          })()}
 
           {permTab === 'scopes' && (
             <Panel
               title="Approval roles & scopes"
-              subtitle="How each role resolves — built-in roles plus custom roles created here"
+              subtitle="Live backend roles — edit names, archive to remove, and pick a replacement for workflow steps. Final Authority is protected."
               actions={
                 canManage ? (
                   <Btn onClick={() => setRoleOpen(true)}>
@@ -824,45 +1157,57 @@ export function SettingsView() {
               }
             >
               <div className="space-y-2">
-                {Object.keys(roleLabels).map((key) => (
-                  <div key={key} className="rounded-xl border border-border px-3 py-2.5">
-                    <div className="flex items-center gap-2 mb-1">
-                      <ShieldCheck className="w-4 h-4 text-teal-700" />
-                      <p className="text-[13px] font-semibold text-foreground">{roleLabels[key as ApproverRole]}</p>
+                {allRoleIds.map((key) => {
+                  const custom = customRoles.some((c) => c.id === key)
+                  const desc = roleDescriptions[key] || roleScopeText(key)
+                  const holders = employees.filter((e) => ((rolesOf(e.id) ?? []) as string[]).includes(key)).length
+                  return (
+                    <div key={key} className={cn('rounded-xl border px-3 py-2.5', custom ? 'border-teal-300 bg-teal-50/60 dark:bg-teal-950/40 dark:border-teal-900' : 'border-border bg-warm dark:bg-muted/30')}>
+                      <div className="flex items-center gap-2 mb-1">
+                        {custom ? <UserCog className="w-4 h-4 text-teal-700" /> : <ShieldCheck className="w-4 h-4 text-teal-700" />}
+                        <p className="text-[13px] font-semibold text-foreground flex-1">{roleName(key)}</p>
+                        {key === 'FINAL_AUTHORITY' && (
+                          <span title="Terminal approver of last resort — this role cannot be deleted." className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+                            <Lock className="w-2.5 h-2.5" /> PROTECTED
+                          </span>
+                        )}
+                        <span className={cn('rounded-full text-[9px] font-bold px-1.5 py-0.5', custom ? 'bg-teal-600 text-white' : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-300')}>
+                          {custom ? 'CUSTOM' : 'SYSTEM'}
+                        </span>
+                        {holders > 0 && (
+                          <span className="rounded-full border border-border bg-card text-[9px] font-semibold px-1.5 py-0.5 text-muted-foreground">
+                            {holders} holder{holders === 1 ? '' : 's'}
+                          </span>
+                        )}
+                        {/* Every role is deletable except Final Authority — DPP:
+                            it is the terminal approver of last resort, and the
+                            resolver falls back to it when a chain would be empty. */}
+                        {canManage && key !== 'FINAL_AUTHORITY' && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => { setRoleEdit({ id: key, label: roleName(key), description: roleDescriptions[key] ?? desc }); setRoleEditDraft({ label: roleName(key), description: roleDescriptions[key] ?? desc }) }}
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-border text-foreground hover:bg-card transition"
+                              aria-label={`Edit ${roleName(key)}`}
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setRoleDelete(key)}
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-border text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950 transition"
+                              aria-label={`Delete ${roleName(key)}`}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">{desc || 'No description — permissions are set in the matrix and capped by the granular access codes.'}</p>
+                      <p className="text-[10px] text-muted-foreground/70 mt-1 font-mono">{key}</p>
                     </div>
-                    <p className="text-[11px] text-muted-foreground leading-relaxed">{roleScopeText(key)}</p>
-                  </div>
-                ))}
-                {customRoles.map((r) => (
-                  <div key={r.id} className="rounded-xl border border-teal-300 bg-teal-50/60 dark:bg-teal-950/40 dark:border-teal-900 px-3 py-2.5">
-                    <div className="flex items-center gap-2 mb-1">
-                      <UserCog className="w-4 h-4 text-teal-700" />
-                      <p className="text-[13px] font-semibold text-foreground flex-1">{r.label}</p>
-                      <span className="rounded-full bg-teal-600 text-white text-[9px] font-bold px-1.5 py-0.5">CUSTOM</span>
-                      {canManage && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => { setRoleEdit({ id: r.id, label: r.label, description: r.description }); setRoleEditDraft({ label: r.label, description: r.description }) }}
-                            className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-border text-foreground hover:bg-card transition"
-                            aria-label={`Edit ${r.label}`}
-                          >
-                            <Pencil className="w-3 h-3" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setRoleDelete(r.id)}
-                            className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-border text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950 transition"
-                            aria-label={`Delete ${r.label}`}
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-muted-foreground leading-relaxed">{r.description || 'No description — permissions are set in the matrix and capped by the granular access codes.'}</p>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </Panel>
           )}
@@ -917,12 +1262,12 @@ export function SettingsView() {
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
               <Panel title="Held by" subtitle="People carrying built-in approval roles right now">
                 <div className="space-y-2">
-                  {Object.entries(EMPLOYEE_ROLES).map(([empId, roles]) => (
-                    <div key={empId} className="flex items-center gap-3 rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2">
-                      <Avatar id={empId} size="sm" />
+                  {employees.filter((e) => (rolesOf(e.id) ?? []).length > 0).map((e) => (
+                    <div key={e.id} className="flex items-center gap-3 rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2">
+                      <Avatar id={e.id} size="sm" />
                       <div className="min-w-0 flex-1">
-                        <p className="text-[12px] font-semibold text-foreground truncate">{EMPLOYEES.find((e) => e.id === empId)?.name}</p>
-                        <p className="text-[10px] text-muted-foreground truncate">{roles.map((r) => roleLabels[r]).join(', ')}</p>
+                        <p className="text-[12px] font-semibold text-foreground truncate">{e.name}</p>
+                        <p className="text-[10px] text-muted-foreground truncate">{(rolesOf(e.id) ?? []).map((r) => roleName(r)).join(', ')}</p>
                       </div>
                     </div>
                   ))}
@@ -990,14 +1335,14 @@ export function SettingsView() {
       <Modal
         open={regOpen}
         onClose={() => { if (!regBusy) setRegOpen(false) }}
-        title="Register new employee"
-        subtitle="Creates a login, employee record, approval roles and reporting line. Audited on save."
+        title="Add employee"
+        subtitle="Creates a login, employee record and approval roles."
         size="lg"
         footer={
           <div className="flex items-center gap-2">
             <Btn variant="ghost" onClick={() => setRegOpen(false)} disabled={regBusy}>Cancel</Btn>
             <Btn onClick={saveRegister} disabled={!canRegister || regBusy}>
-              <Save className="w-3.5 h-3.5" /> {regBusy ? 'Registering…' : 'Register employee'}
+              <Save className="w-3.5 h-3.5" /> {regBusy ? 'Adding…' : 'Add employee'}
             </Btn>
           </div>
         }
@@ -1006,87 +1351,124 @@ export function SettingsView() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             <TextInput label="Full name" value={regDraft.full_name} onChange={(e) => setRegDraft({ ...regDraft, full_name: e.target.value })} placeholder="e.g. Amina Yusuf Mwinyi" />
             <TextInput label="Payroll no." value={regDraft.payroll_no} onChange={(e) => setRegDraft({ ...regDraft, payroll_no: e.target.value })} placeholder="DPP-1013" />
-            <TextInput label="Work email" value={regDraft.email} onChange={(e) => setRegDraft({ ...regDraft, email: e.target.value })} placeholder="name@dpp.go.tz" />
+            <TextInput label="Work email" type="email" value={regDraft.email} onChange={(e) => setRegDraft({ ...regDraft, email: e.target.value })} placeholder="name@dpp.go.tz" />
             <TextInput label="Username (login)" value={regDraft.username} onChange={(e) => setRegDraft({ ...regDraft, username: e.target.value })} placeholder="unique username" />
             <SelectInput label="Gender" value={regDraft.gender} onChange={(e) => setRegDraft({ ...regDraft, gender: e.target.value as 'M' | 'F' })}>
               <option value="M">Male</option>
               <option value="F">Female</option>
             </SelectInput>
+            <MultiSelect
+              label="Approval roles"
+              hint="Blank inherits the position's defaults. Choosing a position auto-inherits its default roles."
+              placeholder="Select approval roles…"
+              options={allRoleIds.map((r) => ({ value: r, label: roleName(r) }))}
+              value={regDraft.role_ids}
+              onChange={(next) => setRegDraft((d) => ({ ...d, role_ids: next }))}
+            />
+          </div>
+
+          {/* Placement — zone → department → division → unit → position */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+            <SelectInput label="Zone" value={regDraft.zone_id} onChange={(e) => {
+              const zoneId = e.target.value
+              setRegDraft((d) => {
+                const zoneDepts = allDepts.filter((x) => x.zoneId === zoneId)
+                const deptId = (zoneDepts.find((x) => !x.parentId) ?? zoneDepts[0])?.id ?? ''
+                const divisionId = zoneDepts.find((x) => x.parentId === deptId)?.id ?? ''
+                const unitId = zoneDepts.find((x) => x.parentId === divisionId)?.id ?? ''
+                const path = new Set([deptId, divisionId, unitId].filter(Boolean))
+                const pos = positionOptions.find((p) => !p.department_id || path.has(p.department_id))
+                return { ...d, zone_id: zoneId, department_id: deptId, division_id: divisionId, unit_id: unitId, position_id: pos?.id ?? d.position_id }
+              })
+            }}>
+              {allZones.map((z) => (
+                <option key={z.id} value={z.id}>{z.name}</option>
+              ))}
+            </SelectInput>
+            <SelectInput label="Department" value={regDraft.department_id} onChange={(e) => {
+              const deptId = e.target.value
+              setRegDraft((d) => {
+                const divisionId = allDepts.find((x) => x.parentId === deptId)?.id ?? ''
+                const unitId = allDepts.find((x) => x.parentId === divisionId)?.id ?? ''
+                const path = new Set([deptId, divisionId, unitId].filter(Boolean))
+                const pos = positionOptions.find((p) => !p.department_id || path.has(p.department_id))
+                return { ...d, department_id: deptId, division_id: divisionId, unit_id: unitId, position_id: pos?.id ?? d.position_id }
+              })
+            }}>
+              <option value="">— select —</option>
+              {regDepartments.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </SelectInput>
+            <SelectInput label="Division" value={regDraft.division_id} onChange={(e) => {
+              const divisionId = e.target.value
+              setRegDraft((d) => {
+                const unitId = allDepts.find((x) => x.parentId === divisionId)?.id ?? ''
+                return { ...d, division_id: divisionId, unit_id: unitId }
+              })
+            }}>
+              <option value="">— none —</option>
+              {regDivisions.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </SelectInput>
+            <SelectInput label="Unit" value={regDraft.unit_id} onChange={(e) => setRegDraft({ ...regDraft, unit_id: e.target.value })}>
+              <option value="">— none —</option>
+              {regUnits.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </SelectInput>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             <SelectInput label="Position" value={regDraft.position_id} onChange={(e) => {
               const posId = e.target.value
               const pos = positionOptions.find((p) => p.id === posId)
               const inherited = pos?.default_roles ?? []
               setRegDraft((d) => ({ ...d, position_id: posId, role_ids: inherited.length ? [...new Set([...inherited, ...d.role_ids])] : d.role_ids }))
             }}>
-              {positionOptions.filter((p) => !p.department_id || p.department_id === regDraft.department_id).map((p) => (
+              <option value="">— select —</option>
+              {regPositions.map((p) => (
                 <option key={p.id} value={p.id}>{p.title}</option>
-              ))}
-            </SelectInput>
-            <SelectInput label="Initial password" value={regDraft.password} onChange={(e) => setRegDraft({ ...regDraft, password: e.target.value })}>
-              <option value="password">password</option>
-              <option value="password123">password123</option>
-              <option value={regDraft.password}>{regDraft.password || 'custom…'}</option>
-            </SelectInput>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
-            <SelectInput label="Department" value={regDraft.department_id} onChange={(e) => {
-              const deptId = e.target.value
-              setRegDraft((d) => {
-                const opts = positionOptions.filter((p) => !p.department_id || p.department_id === deptId)
-                const posId = opts.some((o) => o.id === d.position_id) ? d.position_id : opts[0]?.id ?? d.position_id
-                return { ...d, department_id: deptId, position_id: posId }
-              })
-            }}>
-              {allDepts.map((d) => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </SelectInput>
-            <SelectInput label="Zone" value={regDraft.zone_id} onChange={(e) => setRegDraft({ ...regDraft, zone_id: e.target.value })}>
-              {allZones.map((z) => (
-                <option key={z.id} value={z.id}>{z.name}</option>
               ))}
             </SelectInput>
             <TextInput label="Hire date" type="date" value={regDraft.hire_date} onChange={(e) => setRegDraft({ ...regDraft, hire_date: e.target.value })} />
           </div>
+
+          {/* Password last — presets satisfy the backend password rule. */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-            <SelectInput label="Reports to (supervisor)" value={regDraft.supervisor_employee_id} onChange={(e) => setRegDraft({ ...regDraft, supervisor_employee_id: e.target.value })}>
-              <option value="">— none —</option>
-              {employees.filter((x) => x.active).map((x) => (
-                <option key={x.id} value={x.id}>{x.name}</option>
-              ))}
-            </SelectInput>
-                <div>
-                  <p className="mb-1.5 text-[12px] font-medium text-foreground">Approval roles</p>
-                  <div className="mb-2">
-                    <SelectInput
-                      label="Add approval role"
-                      value=""
-                      onChange={(e) => {
-                        const rid = e.target.value
-                        if (!rid) return
-                        setRegDraft((d) => (d.role_ids.includes(rid) ? d : { ...d, role_ids: [...d.role_ids, rid] }))
-                      }}
-                    >
-                      <option value="">Select a role to bind…</option>
-                      {allRoleIds.filter((r) => !regDraft.role_ids.includes(r)).map((r) => (
-                        <option key={r} value={r}>{roleName(r)}</option>
-                      ))}
-                    </SelectInput>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {regDraft.role_ids.length > 0 ? (
-                      allRoleIds.filter((r) => regDraft.role_ids.includes(r)).map((r) => (
-                        <span key={r} className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary text-muted-foreground dark:bg-muted/40 dark:text-muted-foreground px-2.5 py-1 text-[11px] font-medium">
-                          {roleName(r)}
-                          <button type="button" onClick={() => setRegDraft((d) => ({ ...d, role_ids: d.role_ids.filter((x) => x !== r) }))} className="text-muted-foreground hover:text-foreground">×</button>
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-[11px] text-muted-foreground">No explicit roles — blank inherits the position's defaults.</span>
-                    )}
-                  </div>
-                  <p className="text-[10px] text-muted-foreground mt-1.5">Choosing a position above auto-inherits its default roles.</p>
-                </div>
+            <div className="space-y-2">
+              <SelectInput
+                label="Initial password"
+                hint="8+ characters with uppercase, lowercase and a number."
+                value={regDraft.passwordCustom ? 'custom' : regDraft.password}
+                onChange={(e) => {
+                  const value = e.target.value
+                  if (value === 'custom') setRegDraft({ ...regDraft, passwordCustom: true, password: '' })
+                  else setRegDraft({ ...regDraft, passwordCustom: false, password: value })
+                }}
+              >
+                {PASSWORD_PRESETS.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+                <option value="custom">Custom password…</option>
+              </SelectInput>
+              {regDraft.passwordCustom && (
+                <TextInput
+                  label="Custom password"
+                  type="password"
+                  value={regDraft.password}
+                  onChange={(e) => setRegDraft({ ...regDraft, password: e.target.value })}
+                  placeholder="Enter a password"
+                  autoComplete="new-password"
+                />
+              )}
+              {regDraft.password && !passwordIsValid(regDraft.password) && (
+                <p className="text-[11px] text-rose-600">
+                  Use at least 8 characters with an uppercase letter, a lowercase letter and a number.
+                </p>
+              )}
+            </div>
           </div>
         </div>
       </Modal>
@@ -1118,11 +1500,14 @@ export function SettingsView() {
               <DetailCell label="Hired" value={viewTarget.hireDate ? viewTarget.hireDate.slice(0, 10) : '—'} />
               <DetailCell label="Zone" value={getZone(viewTarget.zoneId).name} />
             </div>
-            {([...(viewTarget.roleIds ?? []), ...(customRoleAssignments[viewTarget.id] ?? [])]).length > 0 && (
+            {/* customRoleAssignments is derived from roleIds (the non-system subset),
+                so merging the two without de-duplicating renders every custom role
+                twice and trips React's unique-key warning. */}
+            {([...new Set([...(viewTarget.roleIds ?? []), ...(customRoleAssignments[viewTarget.id] ?? [])])]).length > 0 && (
               <div className="rounded-xl border border-border p-3.5">
                 <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">Approval roles</p>
                 <div className="flex flex-wrap gap-1.5">
-                  {[...(viewTarget.roleIds ?? []), ...(customRoleAssignments[viewTarget.id] ?? [])].map((r) => (
+                  {[...new Set([...(viewTarget.roleIds ?? []), ...(customRoleAssignments[viewTarget.id] ?? [])])].map((r) => (
                     <span key={r} className="rounded-full border border-teal-200 bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300 dark:border-teal-900 px-2.5 py-1 text-[11px] font-medium">
                       {roleName(r)}
                     </span>
@@ -1180,41 +1565,27 @@ export function SettingsView() {
             <TextInput label="Hire date" type="date" value={editDraft.hireDate ? editDraft.hireDate.slice(0, 10) : ''} onChange={(e) => setEditDraft({ ...editDraft, hireDate: e.target.value })} />
           </div>
           <TextInput label="New password" type="password" value={editDraft.password} onChange={(e) => setEditDraft({ ...editDraft, password: e.target.value })} placeholder="Leave blank to keep the current one" autoComplete="new-password" />
-          <div>
-            <p className="mb-1.5 text-[12px] font-medium text-foreground">Approval roles</p>
-            <div className="flex flex-wrap gap-1.5">
-              {allRoleIds.map((r) => {
-                const on = editDraft.roleIds.includes(r)
-                return (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => setEditDraft((d) => ({ ...d, roleIds: on ? d.roleIds.filter((x) => x !== r) : [...d.roleIds, r] }))}
-                    className={cn(
-                      'rounded-full border px-2.5 py-1 text-[11px] font-medium transition',
-                      on ? 'border-teal-600 bg-teal-600 text-white' : 'border-border bg-secondary text-muted-foreground hover:text-foreground',
-                    )}
-                  >
-                    {roleName(r)}
-                  </button>
-                )
-              })}
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-1">Unconditional roles are replaced on save; department/zone scoped heads are managed separately.</p>
-          </div>
+          <MultiSelect
+            label="Approval roles"
+            hint="Unconditional roles are replaced on save; department/zone scoped heads are managed separately."
+            placeholder="Select approval roles…"
+            options={allRoleIds.map((r) => ({ value: r, label: roleName(r) }))}
+            value={editDraft.roleIds}
+            onChange={(next) => setEditDraft((d) => ({ ...d, roleIds: next }))}
+          />
           <p className="text-[10px] text-muted-foreground">Full name is managed by HR records; the position drives the job title shown across the system.</p>
         </div>
       </Modal>
 
       <Modal
         open={zoneOpen}
-        onClose={() => setZoneOpen(false)}
-        title="Add administrative zone"
-        subtitle="New zones appear across the system; staff assigned to them see only their own zone."
+        onClose={() => { setZoneEditId(null); setZoneOpen(false) }}
+        title={zoneEditId ? `Edit zone — ${zoneName(zoneEditId)}` : 'Add administrative zone'}
+        subtitle="Zones appear across the system; staff assigned to them see only their own zone."
         size="md"
         footer={
           <Btn onClick={saveZone} disabled={!zoneDraft.name.trim() || !zoneDraft.short.trim()}>
-            <Save className="w-3.5 h-3.5" /> Create zone
+            <Save className="w-3.5 h-3.5" /> {zoneEditId ? 'Save changes' : 'Create zone'}
           </Btn>
         }
       >
@@ -1243,13 +1614,13 @@ export function SettingsView() {
 
       <Modal
         open={deptOpen}
-        onClose={() => setDeptOpen(false)}
-        title="Add department"
+        onClose={() => { setDeptEditId(null); setDeptOpen(false) }}
+        title={deptEditId ? `Edit department — ${deptDraft.name}` : 'Add department'}
         subtitle="Operational units are attached to an administrative zone."
         size="md"
         footer={
           <Btn onClick={saveDept} disabled={!deptDraft.name.trim()}>
-            <Save className="w-3.5 h-3.5" /> Create department
+            <Save className="w-3.5 h-3.5" /> {deptEditId ? 'Save changes' : 'Create department'}
           </Btn>
         }
       >
@@ -1260,6 +1631,34 @@ export function SettingsView() {
               <option key={z.id} value={z.id}>{z.name}</option>
             ))}
           </SelectInput>
+        </div>
+      </Modal>
+
+      <Modal open={divOpen} onClose={() => { setDivEditId(null); setDivOpen(false) }} title={divEditId ? `Edit division — ${divDraft.name}` : 'Add division'} subtitle="Sub-department based on a parent department." size="md" footer={<Btn onClick={saveDiv} disabled={!divDraft.name.trim()}><Save className="w-3.5 h-3.5" /> {divEditId ? 'Save changes' : 'Create division'}</Btn>}>
+        <div className="space-y-4">
+          <TextInput label="Division name" value={divDraft.name} onChange={(e) => setDivDraft({ ...divDraft, name: e.target.value })} placeholder="e.g. Appeals Division" />
+          <SelectInput label="Parent department" value={divDraft.parent_department_id || ''} onChange={(e) => setDivDraft({ ...divDraft, parent_department_id: e.target.value || null })}>
+            <option value="">— root / none —</option>
+            {allDepts.filter((d) => d.unitType === 'department' || !d.unitType).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </SelectInput>
+          <SelectInput label="Zone" value={divDraft.zone_id} onChange={(e) => setDivDraft({ ...divDraft, zone_id: e.target.value })}>
+            {allZones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
+          </SelectInput>
+          <div className="flex items-center gap-2"><input type="checkbox" checked={divDraft.reports_directly_to_leadership} onChange={(e) => setDivDraft({ ...divDraft, reports_directly_to_leadership: e.target.checked })} className="accent-teal-700" /><span className="text-[12px]">Reports directly to leadership</span></div>
+        </div>
+      </Modal>
+
+      <Modal open={unitOpen} onClose={() => { setUnitEditId(null); setUnitOpen(false) }} title={unitEditId ? `Edit unit — ${unitDraft.name}` : 'Add unit'} subtitle="Sub-division based on a parent division or department." size="md" footer={<Btn onClick={saveUnit} disabled={!unitDraft.name.trim()}><Save className="w-3.5 h-3.5" /> {unitEditId ? 'Save changes' : 'Create unit'}</Btn>}>
+        <div className="space-y-4">
+          <TextInput label="Unit name" value={unitDraft.name} onChange={(e) => setUnitDraft({ ...unitDraft, name: e.target.value })} placeholder="e.g. Legal Research Unit" />
+          <SelectInput label="Parent division/department" value={unitDraft.parent_department_id || ''} onChange={(e) => setUnitDraft({ ...unitDraft, parent_department_id: e.target.value || null })}>
+            <option value="">— root / none —</option>
+            {allDepts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </SelectInput>
+          <SelectInput label="Zone" value={unitDraft.zone_id} onChange={(e) => setUnitDraft({ ...unitDraft, zone_id: e.target.value })}>
+            {allZones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
+          </SelectInput>
+          <div className="flex items-center gap-2"><input type="checkbox" checked={unitDraft.reports_directly_to_leadership} onChange={(e) => setUnitDraft({ ...unitDraft, reports_directly_to_leadership: e.target.checked })} className="accent-teal-700" /><span className="text-[12px]">Reports directly to leadership</span></div>
         </div>
       </Modal>
 
@@ -1431,20 +1830,88 @@ export function SettingsView() {
         }}
       />
 
+      <ConfirmModal open={divDelete !== null} onClose={() => setDivDelete(null)} title="Delete this division?" confirmLabel="Delete division" tone="danger" message={<p>Remove <span className="font-semibold text-foreground">{divDelete ? divisions.find((d) => d.id === divDelete)?.name : ''}</span> from the directory. The action is audited.</p>} onConfirm={() => { if (divDelete) { void leaveApi.org.deleteDivision(divDelete).then(() => { try { leaveApi.org.divisions().then((r) => setDivisions(r.data)) } catch {} }) }; setDivDelete(null) }} />
+
+      <ConfirmModal open={unitDelete !== null} onClose={() => setUnitDelete(null)} title="Delete this unit?" confirmLabel="Delete unit" tone="danger" message={<p>Remove <span className="font-semibold text-foreground">{unitDelete ? units.find((d) => d.id === unitDelete)?.name : ''}</span> from the directory. The action is audited.</p>} onConfirm={() => { if (unitDelete) { void leaveApi.org.deleteUnit(unitDelete).then(() => { try { leaveApi.org.units().then((r) => setUnits(r.data)) } catch {} }) }; setUnitDelete(null) }} />
+
       <ConfirmModal
         open={roleDelete !== null}
         onClose={() => setRoleDelete(null)}
-        title="Delete approval role?"
-        confirmLabel="Delete role"
+        title="Archive this approval role?"
+        confirmLabel="Archive role"
         tone="danger"
         message={
           <p>
-            Remove <span className="font-semibold text-foreground">{roleDelete ? roleName(roleDelete) : ''}</span>, its permission entries and all holder assignments. Anyone holding it instantly loses its permissions. The action is audited.
+            <span className="font-semibold text-foreground">{roleDelete ? roleName(roleDelete) : ''}</span> will stop granting anything — holders keep the reference for history but lose its permissions immediately. If an approval workflow still routes steps through this role, you will be asked which role should take them over first. The action is audited and can be reversed by an administrator.
           </p>
         }
         onConfirm={() => {
-          if (roleDelete) deleteRole(roleDelete)
+          if (!roleDelete) return
+          const target = roleDelete
+          void deleteRole(target).then((res) => {
+            // 'blocked' = live workflow steps still point at this role. Offer to
+            // hand those steps to another role rather than leaving a dead end.
+            if (res === 'blocked') {
+              setRoleReassign({ id: target, steps: 0 })
+              setRoleReassignTarget('FINAL_AUTHORITY')
+            }
+          })
           setRoleDelete(null)
+        }}
+      />
+
+      <Modal
+        open={roleReassign !== null}
+        onClose={() => setRoleReassign(null)}
+        title="Hand over this role's approval steps"
+        size="md"
+      >
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          <span className="font-semibold text-foreground">{roleReassign ? roleName(roleReassign.id) : ''}</span> is
+          still required by an approval workflow. Pick the role that should take over those steps — then this role can be archived.
+        </p>
+        <div className="mt-4">
+          <SelectInput
+            label="Route its steps to"
+            value={roleReassignTarget}
+            onChange={(e) => setRoleReassignTarget(e.target.value)}
+          >
+            {Object.keys(rolePermissions)
+              .filter((r) => r !== roleReassign?.id)
+              .map((r) => (
+                <option key={r} value={r}>{roleName(r)}</option>
+              ))}
+          </SelectInput>
+        </div>
+        <div className="flex items-center justify-end gap-2 mt-6">
+          <Btn variant="ghost" onClick={() => setRoleReassign(null)}>Cancel</Btn>
+          <Btn
+            onClick={() => {
+              if (!roleReassign) return
+              const { id } = roleReassign
+              const to = roleReassignTarget
+              setRoleReassign(null)
+              void deleteRole(id, to)
+            }}
+          >
+            Reassign &amp; archive
+          </Btn>
+        </div>
+      </Modal>
+
+      <ConfirmModal
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        title="Delete this staff member?"
+        confirmLabel="Delete permanently"
+        tone="danger"
+        message={
+          <p>
+            Permanently remove <span className="font-semibold text-foreground">{deleteTarget?.name}</span> — their login, employee record, approval roles and reporting line. Staff who are a department/zone head, or who have leave history, are refused for data integrity. This cannot be undone. The action is audited.
+          </p>
+        }
+        onConfirm={() => {
+          if (deleteTarget) void deleteEmployee(deleteTarget.id)
         }}
       />
     </div>

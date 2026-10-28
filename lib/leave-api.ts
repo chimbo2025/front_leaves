@@ -40,6 +40,31 @@ export interface AuthRole {
   effective_to: string | null
 }
 
+/**
+ * Resolved data-visibility scope, mirrored from the backend AccessScope value
+ * object. RBAC answers "which codes do you hold"; this answers "which records
+ * may those codes be applied to".
+ */
+export interface AuthAccessScope {
+  can_view_all_zones: boolean
+  allowed_zone_ids: string[]
+  allowed_department_ids: string[]
+  own_records_only: boolean
+}
+
+/**
+ * Server-authoritative capability payload on `/api/me`. The frontend must never
+ * infer zone reach from a role name — a ZONAL_HEAD grant is expressed here as a
+ * concrete zone list.
+ */
+export interface AuthAccess {
+  can_view_cross_zone: boolean
+  can_view_cross_zone_staff: boolean
+  can_view_cross_zone_reports: boolean
+  request_scope: AuthAccessScope
+  staff_scope: AuthAccessScope
+}
+
 export interface AuthUser {
   id: string
   username: string
@@ -47,6 +72,7 @@ export interface AuthUser {
   employee: AuthEmployee | null
   roles: AuthRole[]
   permissions: string[]
+  access?: AuthAccess
 }
 
 export interface LoginResponse {
@@ -65,6 +91,7 @@ export interface ZoneDto {
   is_pemba: boolean
   is_coordination: boolean
   parent_zone_id: string | null
+  head?: { employee_id: string; full_name: string } | null
 }
 
 export interface DepartmentDto {
@@ -74,6 +101,27 @@ export interface DepartmentDto {
   parent_department_id: string | null
   unit_type: string | null
   reports_directly_to_leadership: boolean
+  head?: { employee_id: string; full_name: string } | null
+}
+
+export interface DivisionDto {
+  id: string
+  name: string
+  parent_department_id: string | null
+  zone_id: string | null
+  unit_type: string | null
+  reports_directly_to_leadership: boolean
+  head?: { employee_id: string; full_name: string } | null
+}
+
+export interface UnitDto {
+  id: string
+  name: string
+  parent_department_id: string | null
+  zone_id: string | null
+  unit_type: string | null
+  reports_directly_to_leadership: boolean
+  head?: { employee_id: string; full_name: string } | null
 }
 
 export interface PositionDto {
@@ -103,6 +151,7 @@ export interface EmployeeDto {
   department?: DepartmentDto | null
   zone?: ZoneDto | null
   position?: PositionDto | null
+  scoped_grants?: Array<{ role_id: string; department_id: string | null; scope_zone_id: string | null }>
 }
 
 export interface OrgBranch {
@@ -203,6 +252,7 @@ export interface WorkflowDefDto {
   created_by: string | null
   approved_by: string | null
   notes: string | null
+  is_active: boolean
   leave_type: LeaveTypeDto | null
   steps: WorkflowStepDto[]
 }
@@ -224,6 +274,7 @@ export interface WorkflowStoreInput {
   effective_from?: string
   effective_to?: string | null
   notes?: string | null
+  is_active?: boolean
   steps: WorkflowStepInput[]
 }
 
@@ -260,6 +311,8 @@ export interface RequestCompact {
   employee: { id: string; full_name: string } | null
   leave_type: { code: string; name: string } | null
   assignments: RequestAssignment[]
+  signature_path?: string
+  signature_hash?: string
 }
 
 export interface RequestDto {
@@ -286,6 +339,8 @@ export interface RequestDto {
   policy?: PolicyDto | null
   current_owner?: EmployeeDto | null
   assignments?: WorkflowAssignmentRaw[]
+  signature_path?: string
+  signature_hash?: string
 }
 
 export interface WorkflowAssignmentRaw {
@@ -327,6 +382,8 @@ export interface InboxItem {
   start_date: string | null
   due_at: string | null
   role: string | null
+  /** Assignment landed outside the caller's zone/department record scope. */
+  out_of_scope: boolean
 }
 
 export interface DocumentDto {
@@ -489,14 +546,21 @@ export interface PermissionDto {
   action: string
   label: string | null
   hint: string | null
+  /** False for planned/deactivated codes: the backend refuses to grant them, so
+   *  the matrix must not offer them as toggleable either. */
+  is_grantable?: boolean
 }
 
 export interface RoleDto {
   id: string
   name: string
+  /** Human-readable explanation of what the role is for. Nullable for seeded roles. */
+  description: string | null
   approval_tier: number | null
   is_final_authority: boolean
   is_system: boolean
+  /** Archived roles (delete = deactivate) keep their row but grant nothing. */
+  active?: boolean
   permissions: PermissionDto[]
 }
 
@@ -505,6 +569,84 @@ export interface RoleDto {
 // ---------------------------------------------------------------------------
 export interface ZoneReportRow { zone_id: string | null; name: string; days: number; employees: number; requests: number }
 export interface DepartmentReportRow { department_id: string | null; name: string; days: number; employees: number; requests: number }
+export interface ReportFilters {
+  [key: string]: string | number | boolean | undefined
+  from?: string; to?: string; leave_cycle?: string
+  department_id?: string; zone_id?: string; employee_id?: string
+  leave_type_id?: string; leave_status?: string; payment_status?: string
+  eligibility_status?: string; payment_type?: string; gender?: string
+  search?: string; sort?: string; direction?: 'asc' | 'desc'
+  page?: number; per_page?: number
+}
+
+export interface ReportPageMeta {
+  current_page: number; per_page: number; total: number
+  last_page: number; from: number | null; to: number | null
+  filters: ReportFilters; audience?: string
+}
+
+export interface ReportPageLinks { first: string | null; last: string | null; prev: string | null; next: string | null }
+
+export interface ReportPage<T> { data: T[]; meta: ReportPageMeta; links: ReportPageLinks }
+
+export interface DetailRequestRow {
+  id: number; ref: string
+  employee: { id: string; full_name: string } | null
+  department: { id: string; name: string } | null
+  zone: { id: string; name: string; short: string } | null
+  leave_type: { id: string; code: string; name: string } | null
+  days: number | null; status: string
+  start_date: string | null; end_date: string | null; submitted_at: string | null
+}
+
+export interface DetailStaffRow {
+  id: string; full_name: string; initials: string | null
+  department: { id: string; name: string } | null
+  zone: { id: string; name: string; short: string } | null
+  gender: string | null; hire_date: string | null
+}
+
+export interface ReportSummary {
+  cards: {
+    approved_days: { total: number }; pending: { total: number }; staff: { total: number }
+    gender: { F: number; M: number } | null; requests_logged: { total: number }
+  }
+  by_zone: { zone_id: string | null; zone: string; requests: number; days: number }[]
+  by_type: { leave_type_id: string; name: string; days: number }[]
+  status_mix: { status: string; count: number }[]
+}
+
+export interface PaymentSummary {
+  cards: {
+    total_eligible: { total: number }; paid: { total: number }
+    eligible_unpaid: { total: number }; without_payment_request: { total: number }
+    leave_taken_unpaid: { total: number }; eligible_no_leave: { total: number }
+    pending_hr: { total: number }; pending_accounting: { total: number }
+    processing: { total: number }; rejected: { total: number }
+  }
+  amounts: {
+    total_eligible_amount: number; total_approved_amount: number
+    total_paid_amount: number; outstanding_amount: number; currency: string
+  }
+}
+
+export interface PaymentCaseRow {
+  id: number; payment_type: string; status: string; currency: string | null
+  eligible_amount: number | null; calculated_amount: number | null
+  employee?: { id: string; full_name: string; department?: unknown; zone?: unknown } | null
+  leave_type?: { id: string; code?: string; name?: string } | null
+  leave_request?: { id: number; ref?: string; status?: string; start_date?: string | null; end_date?: string | null; days?: number | null } | null
+  [key: string]: unknown
+}
+
+export interface PaymentPairRow {
+  employee: { id: string; full_name: string; department: unknown; zone: unknown }
+  leave_type: { id: string; code?: string; name?: string }
+  leave_request: { id: number; ref: string; status: string; start_date: string | null; end_date: string | null; days: number | null } | null
+  payment_case: PaymentCaseRow | null
+  eligibility: string
+}
+
 export interface TypeReportRow { leave_type: string; name: string; days: number; requests: number }
 export interface GenderReportRow { gender: 'M' | 'F'; employees: number; requests: number }
 export interface BottleneckRow { role: string; pending: number; overdue: number; tip: string | null }
@@ -611,11 +753,51 @@ export const leaveApi = {
     tree: () => request<{ data: OrgBranch[] }>('/org/tree'),
     updateEmployee: (id: string, body: Partial<Pick<EmployeeDto, 'full_name' | 'initials' | 'payroll_no' | 'position_id' | 'department_id' | 'zone_id' | 'gender' | 'email' | 'hire_date' | 'is_active'> & { role_ids?: string[] } & { password?: string }>) =>
       request<{ data: EmployeeDto }>(`/org/employees/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    /** Permanent staff removal — the API refuses anyone with history (422). */
+    deleteEmployee: (id: string) =>
+      request<{ message: string }>(`/org/employees/${id}`, { method: 'DELETE' }),
+    /** Toggle a single unscoped role grant. Preferred over a full role_ids
+     *  replacement, which would materialise unscoped duplicates of scoped
+     *  department/zonal grants. */
+    grantRole: (employeeId: string, roleId: string) =>
+      request<{ data: EmployeeDto & { unscoped_role_ids: string[] } }>(`/org/employees/${employeeId}/roles/${roleId}`, { method: 'POST' }),
+    revokeRole: (employeeId: string, roleId: string) =>
+      request<{ data: EmployeeDto & { unscoped_role_ids: string[] } }>(`/org/employees/${employeeId}/roles/${roleId}`, { method: 'DELETE' }),
     storePosition: (body: { title: string; department_id: string; zone_id?: string | null; tier?: number; is_final_authority?: boolean; default_role_ids?: string[] }) =>
       request<{ data: PositionDto }>('/org/positions', { method: 'POST', body: JSON.stringify(body) }),
     updatePosition: (id: string, body: Partial<{ title: string; department_id: string; zone_id?: string | null; tier?: number; is_final_authority?: boolean; default_role_ids?: string[] }>) =>
       request<{ data: PositionDto }>(`/org/positions/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     deletePosition: (id: string) => request<{ message: string }>(`/org/positions/${id}`, { method: 'DELETE' }),
+    storeZone: (body: { name: string; short?: string | null; is_hq?: boolean; is_pemba?: boolean; is_coordination?: boolean }) =>
+      request<{ data: ZoneDto }>('/org/zones', { method: 'POST', body: JSON.stringify(body) }),
+    updateZone: (id: string, body: Partial<{ name: string; short?: string | null; is_hq?: boolean; is_pemba?: boolean; is_coordination?: boolean }>) =>
+      request<{ data: ZoneDto }>(`/org/zones/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    deleteZone: (id: string) => request<{ message: string }>(`/org/zones/${id}`, { method: 'DELETE' }),
+    storeDepartment: (body: { name: string; zone_id: string }) =>
+      request<{ data: DepartmentDto }>('/org/departments', { method: 'POST', body: JSON.stringify(body) }),
+    updateDepartment: (id: string, body: Partial<{ name: string; zone_id: string }>) =>
+      request<{ data: DepartmentDto }>(`/org/departments/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    deleteDepartment: (id: string) => request<{ message: string }>(`/org/departments/${id}`, { method: 'DELETE' }),
+    setDepartmentHead: (departmentId: string, employeeId: string) =>
+      request<{ data: DepartmentDto }>(`/org/departments/${departmentId}/head`, { method: 'PUT', body: JSON.stringify({ employee_id: employeeId }) }),
+    clearDepartmentHead: (departmentId: string) =>
+      request<{ data: DepartmentDto }>(`/org/departments/${departmentId}/head`, { method: 'DELETE' }),
+    divisions: () => request<{ data: DivisionDto[] }>('/org/divisions'),
+    storeDivision: (body: { name: string; parent_department_id?: string | null; zone_id?: string | null; unit_type?: string; reports_directly_to_leadership?: boolean }) =>
+      request<{ data: DivisionDto }>('/org/divisions', { method: 'POST', body: JSON.stringify(body) }),
+    updateDivision: (id: string, body: Partial<{ name: string; parent_department_id?: string | null; zone_id?: string | null; unit_type?: string; reports_directly_to_leadership?: boolean }>) =>
+      request<{ data: DivisionDto }>(`/org/divisions/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    deleteDivision: (id: string) => request<{ message: string }>(`/org/divisions/${id}`, { method: 'DELETE' }),
+    units: () => request<{ data: UnitDto[] }>('/org/units'),
+    storeUnit: (body: { name: string; parent_department_id?: string | null; zone_id?: string | null; unit_type?: string; reports_directly_to_leadership?: boolean }) =>
+      request<{ data: UnitDto }>('/org/units', { method: 'POST', body: JSON.stringify(body) }),
+    updateUnit: (id: string, body: Partial<{ name: string; parent_department_id?: string | null; zone_id?: string | null; unit_type?: string; reports_directly_to_leadership?: boolean }>) =>
+      request<{ data: UnitDto }>(`/org/units/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    deleteUnit: (id: string) => request<{ message: string }>(`/org/units/${id}`, { method: 'DELETE' }),
+    setZoneHead: (zoneId: string, employeeId: string) =>
+      request<{ data: ZoneDto }>(`/org/zones/${zoneId}/head`, { method: 'PUT', body: JSON.stringify({ employee_id: employeeId }) }),
+    clearZoneHead: (zoneId: string) =>
+      request<{ data: ZoneDto }>(`/org/zones/${zoneId}/head`, { method: 'DELETE' }),
   },
 
   leave: {
@@ -624,6 +806,8 @@ export const leaveApi = {
       request<{ data: LeaveTypeDto }>('/leave/types', { method: 'POST', body: JSON.stringify(body) }),
     updateType: (id: string, body: Partial<{ code: string; name: string; swahili: string; short: string; is_paid_default: boolean; description: string }>) =>
       request<{ data: LeaveTypeDto }>(`/leave/types/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    /** Delete — the API refuses types carrying history (422) and removes their policies + workflow. */
+    destroyType: (id: string) => request<{ message: string }>(`/leave/types/${id}`, { method: 'DELETE' }),
     currentPolicies: () => request<{ data: PolicyCompactDto[] }>('/leave/policies/current'),
     policyHistory: (leaveTypeId: string) => request<{ data: PolicyDto[] }>(`/leave/policies/${leaveTypeId}/history`),
     myBalance: () => request<{ data: Record<string, BalanceDto> }>('/leave/balance'),
@@ -647,12 +831,17 @@ export const leaveApi = {
       request<{ data: RequestCompact; workflow: ChainItem[] }>(`/requests/${id}/submit`, { method: 'POST' }),
     resubmit: (id: number | string) =>
       request<{ data: RequestCompact; workflow: ChainItem[] }>(`/requests/${id}/resubmit`, { method: 'POST' }),
-    decide: (id: number | string, body: { decision: 'approved' | 'rejected' | 'returned'; comments?: string; end_date?: string | null }) =>
+    decide: (id: number | string, body: { decision: 'approved' | 'rejected' | 'returned'; comments?: string; end_date?: string | null; signature_path?: string; signature_hash?: string }) =>
       request<DecideResponse>(`/requests/${id}/decide`, { method: 'POST', body: JSON.stringify(body) }),
     withdraw: (id: number | string, body: { reason?: string } = {}) =>
       request<{ data: RequestDto }>(`/requests/${id}/withdraw`, { method: 'POST', body: JSON.stringify(body) }),
+    /** Hard delete — drafts only; the API keeps submitted history forever. */
+    destroy: (id: number | string) =>
+      request<{ message: string; id: number | string }>(`/requests/${id}`, { method: 'DELETE' }),
     workflow: (id: number | string) => request<{ data: ChainItem[] }>(`/requests/${id}/workflow`),
     inbox: () => request<{ data: InboxItem[] }>('/requests/inbox'),
+    preview: (body: { employee_id: string; leave_type_id: string; days?: number | null }) =>
+      request<{ data: ChainItem[] }>('/requests/preview', { method: 'POST', body: JSON.stringify(body) }),
     attachDocument: (id: number | string, file: File, kind?: string) => {
       const fd = new FormData()
       fd.append('file', file)
@@ -673,6 +862,8 @@ export const leaveApi = {
     store: (body: WorkflowStoreInput) => request<{ data: WorkflowDefDto }>('/workflows', { method: 'POST', body: JSON.stringify(body) }),
     update: (id: string, body: Partial<Omit<WorkflowStoreInput, 'leave_type_id' | 'id'>>) =>
       request<{ data: WorkflowDefDto }>(`/workflows/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    /** Delete — the API refuses definitions carrying history or the type's last active chain (422). */
+    destroy: (id: string) => request<{ message: string }>(`/workflows/${id}`, { method: 'DELETE' }),
   },
 
   delegations: {
@@ -714,10 +905,17 @@ export const leaveApi = {
   roles: {
     list: () => request<{ data: RoleDto[] }>('/roles'),
     permissions: () => request<{ data: PermissionDto[] }>('/roles/permissions'),
-    store: (body: { id?: string; name: string; approval_tier?: number | null; is_final_authority?: boolean; permissions?: string[] }) =>
+    store: (body: { id?: string; name: string; description?: string | null; approval_tier?: number | null; is_final_authority?: boolean; permissions?: string[] }) =>
       request<{ data: RoleDto }>('/roles', { method: 'POST', body: JSON.stringify(body) }),
-    update: (id: string, body: Partial<{ name: string; approval_tier: number | null; is_final_authority: boolean; permissions: string[] }>) =>
+    update: (id: string, body: Partial<{ name: string; description: string | null; approval_tier: number | null; is_final_authority: boolean; permissions: string[] }>) =>
       request<{ data: RoleDto }>(`/roles/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    /** Workflow-referenced roles are refused with a 422 + `blockers` list unless
+     *  `reassignTo` hands those steps to another live role in the same call. */
+    destroy: (id: string, reassignTo?: string) =>
+      request<{ data: { id: string; archived: boolean; reassign_to?: string } }>(`/roles/${id}`, {
+        method: 'DELETE',
+        ...(reassignTo ? { body: JSON.stringify({ reassign_to: reassignTo }) } : {}),
+      }),
   },
 
   policies: {
@@ -741,10 +939,31 @@ export const leaveApi = {
     department: (params?: { from?: string; to?: string }) => request<{ data: DepartmentReportRow[] }>(`/reports/department${qs(params ?? {})}`),
     type: (params?: { from?: string; to?: string }) => request<{ data: TypeReportRow[] }>(`/reports/type${qs(params ?? {})}`),
     gender: (params?: { from?: string; to?: string }) => request<{ data: GenderReportRow[] }>(`/reports/gender${qs(params ?? {})}`),
-    bottleneck: () => request<{ data: BottleneckRow[] }>('/reports/bottleneck'),
+    bottleneck: () => request<{ data: BottleneckRow[] }>(`/reports/bottleneck`),
     upcoming: (params?: { from?: string; to?: string }) => request<{ data: UpcomingRow[] }>(`/reports/upcoming${qs(params ?? {})}`),
     monthly: (params?: { from?: string; to?: string }) => request<{ data: MonthlyRow[] }>(`/reports/monthly${qs(params ?? {})}`),
-    forecast: () => request<{ data: ForecastRow[] }>('/reports/forecast'),
+    forecast: () => request<{ data: ForecastRow[] }>(`/reports/forecast`),
     staffing: (params?: { from?: string; to?: string }) => request<{ data: StaffingRow[] }>(`/reports/staffing${qs(params ?? {})}`),
+    /** Office summary: card totals + zone/type/status aggregates, one definition shared with every detail endpoint. */
+    summary: (params?: ReportFilters) => request<{ data: ReportSummary; meta: { filters: ReportFilters } }>(`/reports/summary${qs(params ?? {})}`),
+    /** Generic drill-down: kind selects the detail endpoint, params carry the shared filters. */
+    details: (kind: 'approved-days' | 'pending' | 'staff' | 'requests', params?: ReportFilters) =>
+      request<ReportPage<DetailRequestRow | DetailStaffRow>>(`/reports/${kind}/details${qs(params ?? {})}`),
+    genderDetails: (gender: 'M' | 'F', params?: ReportFilters) =>
+      request<ReportPage<DetailRequestRow>>(`/reports/gender/${gender}/details${qs(params ?? {})}`),
+    zoneDetails: (zone: string, params?: ReportFilters) =>
+      request<ReportPage<DetailRequestRow>>(`/reports/leave-usage-by-zone/${zone}/details${qs(params ?? {})}`),
+    typeDetails: (leaveType: string, params?: ReportFilters) =>
+      request<ReportPage<DetailRequestRow>>(`/reports/leave-types/${leaveType}/details${qs(params ?? {})}`),
+    statusDetails: (status: string, params?: ReportFilters) =>
+      request<ReportPage<DetailRequestRow>>(`/reports/status/${status}/details${qs(params ?? {})}`),
+    paymentSummary: (params?: ReportFilters) =>
+      request<{ data: PaymentSummary; meta: { filters: ReportFilters; audience: string } }>(`/reports/payment/summary${qs(params ?? {})}`),
+    paymentCategory: (
+      kind: 'paid' | 'eligible-unpaid' | 'without-payment-request' | 'leave-taken-unpaid' | 'eligible-no-leave' | 'pending-hr' | 'pending-accounting' | 'processing' | 'rejected',
+      params?: ReportFilters,
+    ) => request<ReportPage<PaymentCaseRow | PaymentPairRow>>(`/reports/payment/${kind}${qs(params ?? {})}`),
+    paymentHistory: (employeeId: string, params?: ReportFilters) =>
+      request<ReportPage<PaymentCaseRow>>(`/reports/payment/employees/${employeeId}/history${qs(params ?? {})}`),
   },
 }
