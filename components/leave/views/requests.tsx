@@ -614,7 +614,14 @@ export function RequestsView() {
                 <>
                   <span className={cn('h-2 w-2 rounded-full', lt?.color ?? 'bg-zinc-400')} />
                   <span className="text-[12px] font-semibold text-foreground">{lt?.name}</span>
-                  <span className="text-[11px] text-muted-foreground">· policy v{policy?.version ?? '–'}</span>
+                  {(supervisorMode || can('admin', 'view')) ? (
+                    <>
+                      <span className="text-[11px] text-muted-foreground">balance {bal.remaining}/{bal.accrued} days</span>
+                      <span className="text-[11px] text-muted-foreground">· policy v{policy?.version ?? '–'}</span>
+                    </>
+                  ) : (
+                    <span className="text-[11px] text-muted-foreground">· policy v{policy?.version ?? '–'}</span>
+                  )}
                 </>
               )
             })()}
