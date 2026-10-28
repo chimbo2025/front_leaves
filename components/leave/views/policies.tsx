@@ -667,7 +667,7 @@ function StepEditor({
                 <option key={r} value={r}>{roleLabels[r]}</option>
               ))}
             </SelectInput>
-            <TextInput label="SLA (days)" type="number" min={0} value={s.slaDays} onChange={(e) => onChange(steps.map((x, idx) => (idx === i ? { ...x, slaDays: Number(e.target.value) } : x)))} />
+
             <TextArea label="Rule note" rows={2} value={s.note} onChange={(e) => onChange(steps.map((x, idx) => (idx === i ? { ...x, note: e.target.value } : x)))} />
           </div>
         ))}

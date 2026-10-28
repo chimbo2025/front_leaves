@@ -1639,7 +1639,7 @@ export function SettingsView() {
           <TextInput label="Division name" value={divDraft.name} onChange={(e) => setDivDraft({ ...divDraft, name: e.target.value })} placeholder="e.g. Appeals Division" />
           <SelectInput label="Parent department" value={divDraft.parent_department_id || ''} onChange={(e) => setDivDraft({ ...divDraft, parent_department_id: e.target.value || null })}>
             <option value="">— root / none —</option>
-            {allDepts.filter((d) => d.unitType === 'department' || !d.unitType).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            {allDepts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </SelectInput>
           <SelectInput label="Zone" value={divDraft.zone_id} onChange={(e) => setDivDraft({ ...divDraft, zone_id: e.target.value })}>
             {allZones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}

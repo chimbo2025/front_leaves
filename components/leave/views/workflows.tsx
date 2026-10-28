@@ -105,13 +105,6 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
               <option key={r} value={r}>{roleLabels[r]}</option>
             ))}
           </SelectInput>
-          <TextInput
-            label="SLA (days)"
-            type="number"
-            min={0}
-            value={s.slaDays}
-            onChange={(e) => setDraftSteps((prev) => prev.map((x, idx) => (idx === i ? { ...x, slaDays: Number(e.target.value) } : x)))}
-          />
           <TextArea
             label="Rule note"
             rows={2}
