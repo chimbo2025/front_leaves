@@ -1346,6 +1346,17 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
 
   const submitRequest = React.useCallback(
     (input: NewRequestInput): LeaveRequest => {
+      // Hire-date tenure check — block annual leave until employee reaches service date
+      const hire = employee.hireDate ? new Date(employee.hireDate) : null
+      const annualPolicy = policies.find((p) => p.leaveTypeId === annualTypeId)
+      const minMonths = (annualPolicy as unknown as { min_tenure_months?: number })?.min_tenure_months ?? 0
+      if (hire && minMonths > 0) {
+        const months = (new Date().getFullYear() - hire.getFullYear()) * 12 + (new Date().getMonth() - hire.getMonth())
+        if (months < minMonths) {
+          toast.error('You have not reached the required service tenure for annual leave.')
+          throw new Error('tenure_not_met')
+        }
+      }
       const days = input.endDate ? (input.isHalfDay ? 0.5 : dayCount(input.startDate, input.endDate)) : 0
       const policy = policyEffectiveAt(input.leaveTypeId, TODAY, policies)
       if (!policy) {
