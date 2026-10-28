@@ -4,8 +4,9 @@ import { useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, CalendarCheck, LogIn, LogOut, X, CalendarDays, ListChecks, CalendarRange } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
-  ZONES,
   iso,
+  TODAY,
+  toDate,
   fmtShort,
   fmt,
   getEmployee,
@@ -32,8 +33,13 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const WEEKDAY = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 export function CalendarView() {
-  const { requests, leaveTypes, typeOf } = useLeave()
-  const [cursor, setCursor] = useState({ y: 2026, m: 8 })
+  const { requests, leaveTypes, typeOf, canViewEmployee, allZones } = useLeave()
+  // The calendar opens on the CURRENT month and follows the clock — no
+  // pinned month anywhere. Everything "today" below derives from TODAY.
+  const [cursor, setCursor] = useState(() => {
+    const d = toDate(TODAY)
+    return { y: d.getFullYear(), m: d.getMonth() }
+  })
   const [tab, setTab] = useState('calendar')
   const [zoneFilter, setZoneFilter] = useState('all')
   const [search, setSearch] = useState('')
@@ -67,7 +73,7 @@ export function CalendarView() {
 
   const eventsOn = (date: string): LeaveRequest[] =>
     absences.filter((r) => {
-      if (zoneFilter !== 'all' && getEmployee(r.employeeId).zoneId !== zoneFilter) return false
+      if (zoneFilter !== 'all' && getEmployee(r.employeeId)?.zoneId !== zoneFilter) return false
       return r.startDate <= date && r.endDate >= date
     })
 
@@ -75,7 +81,7 @@ export function CalendarView() {
   const monthStart = `${cursor.y}-${String(cursor.m + 1).padStart(2, '0')}-01`
   const monthEnd = `${cursor.y}-${String(cursor.m + 1).padStart(2, '0')}-31`
 
-  const todayAbsences = eventsOn('2026-09-09')
+  const todayAbsences = eventsOn(TODAY)
 
   const approvedRecently = absences
     .filter((r) => r.status === 'approved')
@@ -95,7 +101,7 @@ export function CalendarView() {
     if (r.endDate < from) return false
     const q = search.trim().toLowerCase()
     if (!q) return true
-    return getEmployee(r.employeeId).name.toLowerCase().includes(q)
+        return getEmployee(r.employeeId)?.name.toLowerCase().includes(q) ?? false
   }).sort((a, b) => a.startDate.localeCompare(b.startDate))
   const paged = usePaged(filteredAbsences, 8)
 
@@ -114,7 +120,7 @@ export function CalendarView() {
             className="h-9 rounded-full border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40"
           >
             <option value="all">All zones</option>
-            {ZONES.map((z) => (
+            {allZones.map((z) => (
               <option key={z.id} value={z.id}>{z.name}</option>
             ))}
           </select>
@@ -199,7 +205,7 @@ export function CalendarView() {
                       {eventsOn(cell.date).slice(0, 4).map((r) => (
                         <span
                           key={r.id}
-                          title={`${getEmployee(r.employeeId).name} · ${typeOf(r.leaveTypeId)?.name}`}
+                          title={`${getEmployee(r.employeeId)?.name ?? r.employeeId} · ${typeOf(r.leaveTypeId)?.name}`}
                           className={cn('h-1.5 w-1.5 rounded-full', typeOf(r.leaveTypeId)?.color ?? 'bg-zinc-400')}
                         />
                       ))}
@@ -316,7 +322,7 @@ export function CalendarView() {
                   <li key={r.id} className="flex items-center gap-3 rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2.5">
                     <span className={cn('h-2.5 w-2.5 rounded-full flex-shrink-0', typeOf(r.leaveTypeId)?.color ?? 'bg-zinc-400')} />
                     <div className="min-w-0 flex-1">
-                      <p className="text-[13px] font-semibold text-foreground truncate">{getEmployee(r.employeeId).name}</p>
+                      <p className="text-[13px] font-semibold text-foreground truncate">{getEmployee(r.employeeId)?.name ?? r.employeeId}</p>
                       <p className="text-[11px] text-muted-foreground">{typeOf(r.leaveTypeId)?.name} · {fmt(r.startDate)} → {fmt(r.endDate)} · {r.days}d</p>
                     </div>
                     <Btn variant="outline" onClick={() => setDetail(r)}>Details</Btn>
@@ -352,7 +358,7 @@ export function CalendarView() {
               <div key={r.id} className="flex items-center gap-3 rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2.5">
                 <span className={cn('h-2.5 w-2.5 rounded-full flex-shrink-0', typeOf(r.leaveTypeId)?.color ?? 'bg-zinc-400')} />
                 <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-semibold text-foreground truncate">{getEmployee(r.employeeId).name}</p>
+                  <p className="text-[13px] font-semibold text-foreground truncate">{getEmployee(r.employeeId)?.name ?? r.employeeId}</p>
                   <p className="text-[11px] text-muted-foreground">{typeOf(r.leaveTypeId)?.name} · {fmtShort(r.startDate)} → {fmtShort(r.endDate)}</p>
                 </div>
                 <Btn variant="outline" onClick={() => { setDayEvents(null); setDetail(r) }}>
@@ -367,7 +373,7 @@ export function CalendarView() {
   )
 
   function staffingOn(date: string) {
-    const zones = zoneFilter === 'all' ? ZONES.filter((z) => z.isHQ || !z.isPemba) : ZONES.filter((z) => z.id === zoneFilter)
+    const zones = zoneFilter === 'all' ? allZones.filter((z) => z.isHQ || !z.isPemba) : allZones.filter((z) => z.id === zoneFilter)
     return zones
       .map((z) => ({ zone: z, ratio: staffingCheck(z.id, date, absences) }))
       .filter((z) => z.ratio < 0.55)
@@ -412,7 +418,7 @@ function ActivityColumn({
             <li key={r.id} className="flex items-center gap-2.5 rounded-lg border border-border bg-card px-2.5 py-2">
               <span className={cn('h-2 w-2 rounded-full flex-shrink-0', typeOf(r.leaveTypeId)?.color ?? 'bg-zinc-400')} />
               <div className="min-w-0 flex-1">
-                <p className="text-[12px] font-semibold text-foreground truncate">{getEmployee(r.employeeId).name.split(' ')[0]} — {typeOf(r.leaveTypeId)?.short}</p>
+                <p className="text-[12px] font-semibold text-foreground truncate">{getEmployee(r.employeeId)?.name.split(' ')[0] ?? r.employeeId} - {typeOf(r.leaveTypeId)?.short}</p>
                 <p className="text-[10px] text-muted-foreground truncate">
                   {fmtShort(r.startDate)} → {fmtShort(r.endDate)}
                   {r.status === 'approved' && r.decidedAt && <span className="text-emerald-600"> · decided {fmtShort(r.decidedAt)}</span>}

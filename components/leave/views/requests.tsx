@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
   X,
@@ -33,14 +33,15 @@ import {
   fmt,
   tenureMonths,
   policyEffectiveAt,
-  resolveWorkflow,
   statusLabel,
+  type ApprovalStep,
   type LeaveRequest,
   type Status,
   type LeaveType,
   type Delegation,
   type WorkflowDef,
 } from '@/lib/leave'
+import { ApiError, leaveApi, type ChainItem } from '@/lib/leave-api'
 import { useLeave, type EmployeeRow } from '@/components/leave/leave-context'
 import {
   Avatar,
@@ -64,6 +65,7 @@ import {
   type RowMenuItem,
 } from '@/components/leave/shared'
 import { RequestDetail } from '@/components/leave/request-detail'
+import { ApprovalModal } from '@/components/leave/approval-modal'
 
 interface PartState {
   employeeId: string
@@ -106,6 +108,7 @@ export function RequestsView() {
     employee,
     employeeId,
     supervisorMode,
+    canViewEmployee,
     employees,
     requests,
     delegations,
@@ -120,16 +123,19 @@ export function RequestsView() {
     decide,
     resubmit,
     withdrawRequest,
+    submitDraft,
+    deleteDraft,
     can,
     eligibility,
     orgEligibility,
+    annualTypeId,
   } = useLeave()
 
   const [createOpen, setCreateOpen] = useState(false)
   const [tab, setTab] = useState('requests')
   const [form, setForm] = useState<PartState>({
     employeeId: supervisorMode ? employees[0]?.id : employeeId,
-    leaveTypeId: leaveTypes[0]?.id ?? 'lt1',
+    leaveTypeId: annualTypeId ?? leaveTypes[0]?.id ?? '',
     startDate: addDays(TODAY, 21),
     endDate: addDays(TODAY, 30),
     reason: '',
@@ -141,6 +147,23 @@ export function RequestsView() {
     emergencyReason: '',
   })
   const [search, setSearch] = useState('')
+  // Filter off a debounced copy so typing doesn't re-run the row filter (with
+  // its employee lookups) on every keystroke.
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 200)
+    return () => clearTimeout(t)
+  }, [search])
+
+  // Supervisor mode defaults the applicant to the first staff member, but the
+  // list arrives asynchronously — the initial state may have captured an empty
+  // list. Seed it once employees load so the picker and policy checks have a
+  // real subject.
+  useEffect(() => {
+    if (supervisorMode && !form.employeeId && employees[0]?.id) {
+      setForm((f) => ({ ...f, employeeId: employees[0].id }))
+    }
+  }, [supervisorMode, employees, form.employeeId])
   const [typeFilter, setTypeFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [detail, setDetail] = useState<LeaveRequest | null>(null)
@@ -150,18 +173,30 @@ export function RequestsView() {
   const [deleteReason, setDeleteReason] = useState('')
   const [approveTarget, setApproveTarget] = useState<{ request: LeaveRequest; stepOrder: number } | null>(null)
   const [approveReturnDate, setApproveReturnDate] = useState(TODAY)
+  // Same signature ceremony as the Approvals queue: the API refuses
+  // signature-less approvals, so every Grant path must collect one first.
+  const [signatureStep, setSignatureStep] = useState<'pending' | 'completed'>('pending')
+  const [signatureData, setSignatureData] = useState<{ path: string | null; hash: string | null }>({ path: null, hash: null })
+  const resetSignature = () => {
+    setSignatureStep('pending')
+    setSignatureData({ path: null, hash: null })
+  }
 
-  const scope = supervisorMode ? requests : requests.filter((r) => r.employeeId === employeeId)
-  const filtered = scope.filter((r) => {
-    if (typeFilter !== 'all' && r.leaveTypeId !== typeFilter) return false
-    if (statusFilter !== 'all' && r.status !== statusFilter) return false
-    const q = search.trim().toLowerCase()
-    if (!q) return true
-    const emp = (employees.find((e) => e.id === r.employeeId)?.name ?? r.employeeId).toLowerCase()
-    const lt = typeOf(r.leaveTypeId)?.name.toLowerCase() ?? r.leaveTypeId
-    return r.ref.toLowerCase().includes(q) || emp.includes(q) || r.reason.toLowerCase().includes(q) || lt.includes(q)
-  })
-  const sorted = [...filtered].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const employeeById = useMemo(() => new Map(employees.map((e) => [e.id, e])), [employees])
+
+  const scope = useMemo(() => requests.filter((r) => canViewEmployee(r.employeeId)), [requests, canViewEmployee])
+  const filtered = useMemo(() => {
+    return scope.filter((r) => {
+      if (typeFilter !== 'all' && r.leaveTypeId !== typeFilter) return false
+      if (statusFilter !== 'all' && r.status !== statusFilter) return false
+      const q = debouncedSearch.trim().toLowerCase()
+      if (!q) return true
+      const emp = (employeeById.get(r.employeeId)?.name ?? r.employeeId).toLowerCase()
+      const lt = typeOf(r.leaveTypeId)?.name.toLowerCase() ?? r.leaveTypeId
+      return r.ref.toLowerCase().includes(q) || emp.includes(q) || r.reason.toLowerCase().includes(q) || lt.includes(q)
+    })
+  }, [scope, typeFilter, statusFilter, debouncedSearch, employeeById, typeOf])
+  const sorted = useMemo(() => [...filtered].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [filtered])
   const paged = usePaged(sorted, 8)
 
   const policy = policyEffectiveAt(form.leaveTypeId, TODAY, policies)
@@ -171,15 +206,50 @@ export function RequestsView() {
     () => policyChecks(form, days, employees, requests, policies, leaveTypes, balanceFor),
     [form, days, employees, requests, policies, leaveTypes, balanceFor],
   )
-  const chain = useMemo(
-    () => resolveChain(form, delegations, workflowDefs),
-    [form, delegations, workflowDefs],
-  )
+
+  // Approval-chain preview: the server resolves the chain with the SAME
+  // WorkflowResolver submission uses, so the panel shows what will actually
+  // be persisted. Scoped officers only — hidden for plain employees, who
+  // must not read approver identities before anyone has been asked to act.
+  // There is NO client fallback any more: the server preview is authoritative.
+  const [preview, setPreview] = useState<
+    | { state: 'loading' }
+    | { state: 'ready'; steps: ApprovalStep[] }
+    | { state: 'denied' }
+    | { state: 'failed' }
+  >({ state: 'loading' })
+  const previewSeq = useRef(0)
+  useEffect(() => {
+    if (!createOpen || !supervisorMode) {
+      setPreview({ state: 'loading' })
+      return
+    }
+    const seq = ++previewSeq.current
+    setPreview({ state: 'loading' })
+    const t = setTimeout(() => {
+      leaveApi.requests
+        .preview({
+          employee_id: form.employeeId,
+          leave_type_id: form.leaveTypeId,
+          days: form.endDate ? dayCount(form.startDate, form.endDate) : null,
+        })
+        .then((res) => {
+          if (seq !== previewSeq.current) return
+          setPreview({ state: 'ready', steps: res.data.map(toApprovalStep) })
+        })
+        .catch((err: unknown) => {
+          if (seq !== previewSeq.current) return
+          if (err instanceof ApiError && err.status === 403) setPreview({ state: 'denied' })
+          else setPreview({ state: 'failed' })
+        })
+    }, 250)
+    return () => clearTimeout(t)
+  }, [createOpen, supervisorMode, form.employeeId, form.leaveTypeId, form.startDate, form.endDate])
 
   const activeCount = scope.filter((r) => r.status === 'approved' || r.status === 'under_review').length
   const minePending = pendingApprovals.filter((r) => r.steps.some((s) => s.status === 'pending' && s.assigneeId === employeeId)).length
   const approvedDays = scope.filter((r) => r.status === 'approved').reduce((s, r) => s + r.days, 0)
-  const annual = balanceFor(employeeId, 'lt1')
+  const annual = balanceFor(employeeId, annualTypeId)
 
   const upcoming = scope
     .filter((r) => r.status === 'approved' && r.endDate >= TODAY)
@@ -210,14 +280,12 @@ export function RequestsView() {
       emergencyReason: form.emergency ? form.emergencyReason : undefined,
     }))
     scheduled.forEach((input) => submitRequest(input))
-    toast.success(
-      scheduled.length === 1
-        ? 'Leave request submitted for approval.'
-        : `${scheduled.length} recurring requests submitted — each has its own approval chain.`,
-    )
+    // No success toast here: submitRequest reports the real per-request
+    // outcome (submitted vs saved-as-draft). Toasting success up front was
+    // how failed submissions masqueraded as done while drafts piled up.
     setForm({
       employeeId: supervisorMode ? employees[0]?.id : employeeId,
-      leaveTypeId: leaveTypes[0]?.id ?? 'lt1',
+      leaveTypeId: annualTypeId ?? leaveTypes[0]?.id ?? '',
       startDate: addDays(TODAY, 21),
       endDate: addDays(TODAY, 30),
       reason: '',
@@ -231,7 +299,12 @@ export function RequestsView() {
     setCreateOpen(false)
   }
 
-  const canAct = (r: LeaveRequest) => supervisorMode || r.steps.some((s) => s.status === 'pending' && s.assigneeId === employeeId)
+  // Mirrors approvals.tsx: assigned steps always actionable; supervisor-wide
+  // action additionally needs an approve-tier capability plus record scope.
+  const canApproveAny = can('requests', 'approve') || can('requests', 'approve_zone')
+  const canAct = (r: LeaveRequest) =>
+    r.steps.some((s) => s.status === 'pending' && s.assigneeId === employeeId) ||
+    (supervisorMode && canApproveAny && canViewEmployee(r.employeeId))
   const nextPending = (r: LeaveRequest) => r.steps.find((s) => s.status === 'pending')
 
   const openEdit = (r: LeaveRequest) => {
@@ -252,25 +325,40 @@ export function RequestsView() {
 
   const confirmDelete = () => {
     if (!deleteTarget) return
-    withdrawRequest(deleteTarget.id, deleteReason.trim() || 'Removed from active list')
+    if (deleteTarget.status === 'draft') {
+      // Never submitted → real deletion; the row disappears entirely.
+      deleteDraft(deleteTarget.id)
+      if (detail?.id === deleteTarget.id) setDetail(null)
+    } else {
+      withdrawRequest(deleteTarget.id, deleteReason.trim() || 'Removed from active list')
+    }
     setDeleteReason('')
   }
+
+  const deletingDraft = deleteTarget?.status === 'draft'
 
   const buildMenu = (r: LeaveRequest): RowMenuItem[] => {
     const items: RowMenuItem[] = [{ icon: Eye, label: 'View details', onClick: () => setDetail(r) }]
     const step = nextPending(r)
     if (canAct(r) && step) {
-      items.push({ icon: Check, label: 'Approve', onClick: () => { setApproveTarget({ request: r, stepOrder: step.order }); setApproveReturnDate(r.startDate >= TODAY ? r.startDate : TODAY) } })
+      items.push({ icon: Check, label: 'Approve', onClick: () => { setApproveTarget({ request: r, stepOrder: step.order }); setApproveReturnDate(r.startDate >= TODAY ? r.startDate : TODAY); resetSignature() } })
       items.push({ icon: RotateCcw, label: 'Return to applicant', onClick: () => decide(r.id, step.order, 'returned', '(from list)') })
       items.push({ icon: X, label: 'Reject', tone: 'danger', onClick: () => decide(r.id, step.order, 'rejected', '(from list)') })
     }
-    if (EDITABLE_STATUSES.includes(r.status)) {
+    if (r.status === 'draft') {
+      // Drafts: the applicant alone may retry-submit or truly delete
+      // (the API enforces both). Others see the draft read-only.
+      if (r.employeeId === employeeId) {
+        items.push({ icon: Send, label: 'Submit for approval', onClick: () => submitDraft(r.id) })
+        items.push({ icon: ArchiveX, label: 'Delete draft', tone: 'danger', onClick: () => setDeleteTarget(r) })
+      }
+    } else if (EDITABLE_STATUSES.includes(r.status)) {
       items.push({ icon: Pencil, label: 'Update details', onClick: () => openEdit(r) })
-      items.push({ icon: ArchiveX, label: 'Delete request', tone: 'danger', onClick: () => setDeleteTarget(r) })
+      items.push({ icon: ArchiveX, label: 'Withdraw request', tone: 'danger', onClick: () => setDeleteTarget(r) })
     } else {
       items.push({ icon: ArchiveX, label: 'Delete (history locked)', disabled: true, title: 'Completed requests are kept in the tamper-proof audit trail.' })
     }
-    if (r.status === 'returned_for_correction' && (supervisorMode || r.employeeId === employeeId)) {
+    if (r.status === 'returned_for_correction' && (canViewEmployee(r.employeeId) || r.employeeId === employeeId)) {
       items.push({ icon: RotateCcw, label: 'Resubmit', onClick: () => resubmit(r.id) })
     }
     return items
@@ -294,7 +382,7 @@ export function RequestsView() {
         <StatCard icon={ClipboardList} label="Active requests" value={activeCount} hint={supervisorMode ? 'All staff' : 'Your active requests'} tone="teal" />
         <StatCard icon={Hourglass} label="Pending my approval" value={minePending} hint="Awaiting your decision" tone="amber" />
         <StatCard icon={TrendingUp} label="Days approved" value={approvedDays} hint="Approved days in scope" tone="emerald" />
-        <StatCard icon={Wallet} label={typeOf('lt1')?.name ?? 'Annual leave'} value={`${annual.remaining}d`} hint={`${annual.used} used of ${annual.accrued}`} tone="sky" />
+        <StatCard icon={Wallet} label={typeOf(annualTypeId)?.name ?? 'Annual leave'} value={`${annual.remaining}d`} hint={`${annual.used} used of ${annual.accrued}`} tone="sky" />
       </div>
 
       <Tabs
@@ -481,7 +569,11 @@ export function RequestsView() {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title="New leave request"
-        subtitle="Leave type, policy, balance and approval chain all apply live."
+        subtitle={
+          supervisorMode
+            ? 'Leave type, policy, balance and approval chain all apply live.'
+            : 'Leave type, policy and balance apply live.'
+        }
         size="lg"
         footer={
           <Btn onClick={submit} disabled={!form.reason.trim()}>
@@ -659,27 +751,51 @@ export function RequestsView() {
             </div>
           </Panel>
 
-          <Panel title="Approval chain" subtitle="Assigned from zone, department, role and duration">
-            {chain.length === 0 ? (
-              <p className="text-[12px] text-muted-foreground">No workflow defined for this leave type.</p>
-            ) : (
-              <div className="space-y-2">
-                {chain.map((s, i) => (
-                  <div key={i} className="flex items-center gap-3 rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2.5">
-                    <span className="text-[11px] font-mono text-muted-foreground w-4">{i + 1}</span>
-                    <Avatar id={s.assigneeId} size="sm" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[12px] font-semibold text-foreground truncate">{s.assigneeName}</p>
-                      <p className="text-[10px] text-muted-foreground truncate">{s.roleLabel}{s.via === 'delegation' ? ' · via delegation' : ''}</p>
-                    </div>
-                    {s.role === 'FINAL_AUTHORITY' && (
-                      <span className="text-[9px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 shrink-0">final</span>
-                    )}
+          {supervisorMode && (
+            <Panel title="Approval chain" subtitle="Assigned from zone, department, role and duration">
+              {(() => {
+                if (preview.state === 'loading') {
+                  return <p className="text-[12px] text-muted-foreground">Resolving the approval chain…</p>
+                }
+                if (preview.state === 'denied') {
+                  return (
+                    <p className="text-[12px] text-amber-700 dark:text-amber-400">
+                      You are not authorised to preview this employee's approval chain.
+                    </p>
+                  )
+                }
+                if (preview.state === 'failed') {
+                  return (
+                    <p className="text-[12px] text-rose-700 dark:text-rose-400">
+                      Could not resolve the approval chain. The server returned an error.
+                    </p>
+                  )
+                }
+                // preview.state === 'ready'
+                const steps = preview.steps
+                if (steps.length === 0) {
+                  return <p className="text-[12px] text-muted-foreground">No workflow defined for this leave type.</p>
+                }
+                return (
+                  <div className="space-y-2">
+                    {steps.map((s, i) => (
+                      <div key={i} className="flex items-center gap-3 rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2.5">
+                        <span className="text-[11px] font-mono text-muted-foreground w-4">{i + 1}</span>
+                        <Avatar id={s.assigneeId} size="sm" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[12px] font-semibold text-foreground truncate">{s.assigneeName}</p>
+                          <p className="text-[10px] text-muted-foreground truncate">{s.roleLabel}{s.via === 'delegation' ? ' · via delegation' : ''}</p>
+                        </div>
+                        {s.role === 'FINAL_AUTHORITY' && (
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 shrink-0">final</span>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
-          </Panel>
+                )
+              })()}
+            </Panel>
+          )}
         </div>
       </Modal>
 
@@ -748,21 +864,31 @@ export function RequestsView() {
 
       <ConfirmModal
         open={deleteTarget !== null}
-        onClose={() => setDeleteTarget(null)}
-        title="Delete request?"
-        confirmLabel="Delete request"
+        onClose={() => { setDeleteTarget(null); setDeleteReason('') }}
+        title={deletingDraft ? 'Delete this draft?' : 'Withdraw this request?'}
+        confirmLabel={deletingDraft ? 'Delete draft' : 'Withdraw request'}
         message={
           <div className="space-y-3">
-            <p>
-              This will remove {deleteTarget?.ref} from the active list and close its approval chain. The action is
-              written to the audit trail — it cannot be undone.
-            </p>
-            <input
-              value={deleteReason}
-              onChange={(e) => setDeleteReason(e.target.value)}
-              placeholder="Reason for removal (recorded)"
-              className="w-full h-10 rounded-xl border border-input bg-card px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/40"
-            />
+            {deletingDraft ? (
+              <p>
+                {deleteTarget?.ref} was never submitted, so it has no approval history — it will be removed
+                completely and will not appear anywhere in the list. The deletion itself is written to the
+                audit trail and cannot be undone.
+              </p>
+            ) : (
+              <>
+                <p>
+                  This will remove {deleteTarget?.ref} from the active list and close its approval chain. The
+                  action is written to the audit trail — it cannot be undone.
+                </p>
+                <input
+                  value={deleteReason}
+                  onChange={(e) => setDeleteReason(e.target.value)}
+                  placeholder="Reason for removal (recorded)"
+                  className="w-full h-10 rounded-xl border border-input bg-card px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/40"
+                />
+              </>
+            )}
           </div>
         }
         onConfirm={confirmDelete}
@@ -770,28 +896,47 @@ export function RequestsView() {
 
       <Modal
         open={approveTarget !== null}
-        onClose={() => setApproveTarget(null)}
+        onClose={() => { setApproveTarget(null); resetSignature() }}
         title={approveTarget ? `Approve ${approveTarget.request.ref}` : 'Approve request'}
         subtitle="Grant the leave and set the return date. This decides the number of days and finalises the record."
         size="md"
         footer={
+          signatureStep === 'completed' ? (
           <div className="flex items-center gap-2">
             <Btn
               variant="emerald"
               disabled={!approveReturnDate}
               onClick={() => {
                 if (!approveTarget) return
-                decide(approveTarget.request.id, approveTarget.stepOrder, 'approved', '(approved with return date)', approveReturnDate)
+                decide(approveTarget.request.id, approveTarget.stepOrder, 'approved', '(approved with return date)', approveReturnDate, signatureData.path ?? undefined, signatureData.hash ?? undefined)
+                resetSignature()
                 setApproveTarget(null)
               }}
             >
               <Check className="w-3.5 h-3.5" /> Grant leave
             </Btn>
-            <Btn variant="outline" onClick={() => setApproveTarget(null)}>Cancel</Btn>
+            <Btn variant="outline" onClick={() => { setApproveTarget(null); resetSignature() }}>Cancel</Btn>
           </div>
+          ) : undefined
         }
       >
         {approveTarget && (
+          <>
+            <ApprovalModal
+              open={signatureStep === 'pending'}
+              onClose={() => {
+                // Cancel/X on the signature dialog cancels the whole approval;
+                // setting the step back to "pending" would only reopen it.
+                setApproveTarget(null)
+                resetSignature()
+              }}
+              allowOverwrite={true}
+              onSignatureComplete={async (path: string, hash: string) => {
+                setSignatureData({ path, hash })
+                setSignatureStep('completed')
+              }}
+            />
+            {signatureStep === 'completed' && (
           <div className="space-y-4">
             <div className="rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2.5">
               <p className="text-[12px] font-semibold text-foreground">
@@ -812,20 +957,27 @@ export function RequestsView() {
               {approveReturnDate ? `≈ ${fmtShort(approveTarget.request.startDate)} → ${fmtShort(approveReturnDate)} · ${dayCount(approveTarget.request.startDate, approveReturnDate)} day${dayCount(approveTarget.request.startDate, approveReturnDate) === 1 ? '' : 's'}` : 'Set the return date to grant leave.'}
             </p>
           </div>
+            )}
+          </>
         )}
       </Modal>
     </div>
   )
 }
 
-function resolveChain(form: PartState, delegations: Delegation[], workflowDefs: WorkflowDef[]) {
-  const draft = {
-    employeeId: form.employeeId,
-    leaveTypeId: form.leaveTypeId,
-    days: form.endDate ? dayCount(form.startDate, form.endDate) : 0,
-    submittedAt: TODAY,
-  } as LeaveRequest
-  return resolveWorkflow(draft, delegations, workflowDefs)
+function toApprovalStep(ci: ChainItem, i: number): ApprovalStep {
+  return {
+    order: i + 1,
+    role: ci.role as ApprovalStep['role'],
+    roleLabel: ci.role_label,
+    assigneeId: ci.assignee_id ?? '',
+    assigneeName: ci.assignee_name ?? '',
+    via: ci.via,
+    slaDays: ci.sla_days,
+    dueAt: ci.due_at,
+    status: 'pending',
+    comments: ci.note ?? undefined,
+  }
 }
 
 interface CheckItem {
@@ -845,15 +997,24 @@ function policyChecks(
 ): CheckItem[] {
   const policy = policyEffectiveAt(form.leaveTypeId, TODAY, policies)
   const lt = leaveTypes.find((t) => t.id === form.leaveTypeId)
-  const emp = employees.find((e) => e.id === form.employeeId) as (typeof employees)[number]
-  const bal = balanceFor(form.employeeId, form.leaveTypeId)
-  const tenure = tenureMonths(emp.hireDate)
+  const emp = employees.find((e) => e.id === form.employeeId)
   const out: CheckItem[] = []
 
   if (!policy || !lt) {
     out.push({ Icon: X, toneCls: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-900', text: 'No policy found for this leave type.' })
     return out
   }
+
+  // The applicant list loads asynchronously and scoped officers choose from it,
+  // so this can run for a frame before an employee resolves. Bail out with a
+  // prompt rather than dereferencing `undefined.hireDate`.
+  if (!emp) {
+    out.push({ Icon: X, toneCls: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-900', text: 'Choose an applicant to run the policy checks.' })
+    return out
+  }
+
+  const bal = balanceFor(form.employeeId, form.leaveTypeId)
+  const tenure = tenureMonths(emp.hireDate)
 
   if (tenure < policy.minTenureMonths) {
     out.push({ Icon: X, toneCls: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-900', text: `Minimum tenure of ${policy.minTenureMonths} months not met (have ${tenure}).` })

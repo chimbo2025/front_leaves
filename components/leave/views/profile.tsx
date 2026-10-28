@@ -90,8 +90,8 @@ export function ProfileView() {
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <DetailCell label="Department" value={getDept(employee.departmentId).name} />
-        <DetailCell label="Zone" value={getZone(employee.zoneId).name} />
+        <DetailCell label="Department" value={getDept(employee.departmentId)?.name ?? '—'} />
+        <DetailCell label="Zone" value={getZone(employee.zoneId)?.name ?? '—'} />
         <DetailCell label="Hired" value={employee.hireDate ? employee.hireDate.slice(0, 10) : '—'} />
         <DetailCell label="Gender" value={employee.gender === 'M' ? 'Male' : 'Female'} />
       </div>

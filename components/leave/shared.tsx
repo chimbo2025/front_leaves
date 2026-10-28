@@ -2,7 +2,7 @@
 
 import * as React from 'react'
 import { createPortal } from 'react-dom'
-import { X, Search, MoreHorizontal, ChevronLeft, ChevronRight } from 'lucide-react'
+import { X, Search, MoreHorizontal, ChevronLeft, ChevronRight, ChevronDown, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   getEmployee,
@@ -202,6 +202,115 @@ export function TextArea({
   )
 }
 
+/**
+ * Multi-select dropdown. Unlike a native `<select multiple>` (which needs
+ * ctrl-click and hides the selection count), this keeps chosen values visible
+ * as chips and toggles them from a checkbox list. `value` is treated as a set:
+ * duplicates are collapsed on every change, so a role can never be added twice.
+ */
+export function MultiSelect({
+  label,
+  hint,
+  options,
+  value,
+  onChange,
+  placeholder = 'Select…',
+  disabled,
+}: {
+  label?: string
+  hint?: string
+  options: { value: string; label: string }[]
+  value: string[]
+  onChange: (next: string[]) => void
+  placeholder?: string
+  disabled?: boolean
+}) {
+  const [open, setOpen] = React.useState(false)
+  const rootRef = React.useRef<HTMLDivElement>(null)
+
+  React.useEffect(() => {
+    if (!open) return
+    const onDocDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDocDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const selected = new Set(value)
+  const chosen = options.filter((o) => selected.has(o.value))
+
+  const toggle = (v: string) => {
+    const next = new Set(value)
+    if (next.has(v)) next.delete(v)
+    else next.add(v)
+    onChange([...next])
+  }
+
+  const control = (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+        className={cn(
+          inputCls,
+          'flex h-auto min-h-10 flex-wrap items-center gap-1.5 py-1.5 text-left',
+          disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
+        )}
+      >
+        {chosen.length === 0 ? (
+          <span className="text-muted-foreground">{placeholder}</span>
+        ) : (
+          chosen.map((c) => (
+            <span
+              key={c.value}
+              className="inline-flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[11px] font-semibold text-teal-700 dark:border-teal-900 dark:bg-teal-950 dark:text-teal-300"
+            >
+              {c.label}
+            </span>
+          ))
+        )}
+        <ChevronDown className={cn('ml-auto h-4 w-4 shrink-0 text-muted-foreground transition', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-xl border border-border bg-popover p-1 shadow-lg">
+          {options.length === 0 ? (
+            <p className="px-2 py-1.5 text-[12px] text-muted-foreground">No options available.</p>
+          ) : (
+            options.map((o) => {
+              const on = selected.has(o.value)
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => toggle(o.value)}
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] transition hover:bg-accent',
+                    on ? 'text-foreground' : 'text-muted-foreground',
+                  )}
+                >
+                  <span className={cn('flex h-4 w-4 shrink-0 items-center justify-center rounded border', on ? 'border-teal-600 bg-teal-600 text-white' : 'border-input')}>
+                    {on && <Check className="h-3 w-3" />}
+                  </span>
+                  <span className="truncate">{o.label}</span>
+                </button>
+              )
+            })
+          )}
+        </div>
+      )}
+    </div>
+  )
+
+  return label ? <Field label={label} hint={hint}>{control}</Field> : control
+}
+
 const modalSizes = { md: 'max-w-2xl', lg: 'max-w-4xl', xl: 'max-w-6xl' }
 
 export function Modal({
@@ -236,7 +345,12 @@ export function Modal({
 
   if (!open) return null
 
-  return (
+  // Portal to <body>: detail modals open further modals (the letter view),
+  // and a fixed overlay nested inside another modal's transformed card would
+  // be contained and clipped by it instead of the viewport.
+  if (typeof document === 'undefined') return null
+
+  return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6">
       <div className="absolute inset-0 bg-zinc-950/60 backdrop-blur-sm animate-in fade-in" onClick={onClose} />
       <div
@@ -265,7 +379,8 @@ export function Modal({
           <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border shrink-0">{footer}</div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

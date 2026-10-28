@@ -44,6 +44,9 @@
   --sidebar-border: #e7e4dd;
   --sidebar-ring: #0f766e;
   --warm: #fcfbf8;
+  /* System mono instead of shipping Geist Mono — refs/hashes render fine in
+     Consolas/Menlo and we drop two woff2 files from every first load. */
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
 }
 
 .dark {

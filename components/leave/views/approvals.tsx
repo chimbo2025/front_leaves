@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useCallback } from 'react'
 import React from 'react'
 import {
   Check,
@@ -13,6 +13,7 @@ import {
   ListChecks,
   ShieldCheck,
   Workflow,
+  Shield,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -49,6 +50,7 @@ import {
   type RowMenuItem,
 } from '@/components/leave/shared'
 import { RequestDetail } from '@/components/leave/request-detail'
+import { ApprovalModal } from '@/components/leave/approval-modal'
 
 const STEP_STYLE: Record<StepStatus, string> = {
   pending: 'border-border bg-warm dark:bg-muted/30',
@@ -60,7 +62,7 @@ const STEP_STYLE: Record<StepStatus, string> = {
 }
 
 export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void }) {
-  const { employee, employeeId, supervisorMode, requests, leaveTypes, cases, handovers, decide, typeOf, acceptHandover, can } = useLeave()
+  const { employee, employeeId, supervisorMode, canViewEmployee, requests, leaveTypes, cases, handovers, decide, typeOf, acceptHandover, can } = useLeave()
   const [openId, setOpenId] = useState<string | null>(null)
   const [tab, setTab] = useState('queue')
   const [comments, setComments] = useState<Record<string, string>>({})
@@ -70,16 +72,18 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
   const [approveTarget, setApproveTarget] = useState<{ request: LeaveRequest; stepOrder: number } | null>(null)
   const [approveReturnDate, setApproveReturnDate] = useState(TODAY)
   const [approveComment, setApproveComment] = useState('')
+  const [signatureStep, setSignatureStep] = useState<'pending' | 'completed'>('pending')
+  const [signatureData, setSignatureData] = useState<{ path: string | null; hash: string | null }>({ path: null, hash: null })
 
   const nextStep = (r: LeaveRequest) => r.steps.find((s) => s.status === 'pending')
   const canApproveAny = can('requests', 'approve') || can('requests', 'approve_zone')
-  const canApproveZone = can('requests', 'approve_zone')
   const canAct = (r: LeaveRequest) => {
     const assigned = r.steps.some((s) => s.status === 'pending' && s.assigneeId === employeeId)
     if (assigned) return true
     if (!supervisorMode || !canApproveAny) return false
-    const sameZone = getEmployee(r.employeeId).zoneId === employee.zoneId
-    return sameZone || canApproveZone
+    // Mirrors the server AccessScopeService: cross-zone, zone and department
+    // grants all count, so a DEPT_HEAD is no longer limited to their zone.
+    return canViewEmployee(r.employeeId)
   }
   const pendingHoFor = (r: LeaveRequest) => {
     const c = caseFor(r.id, cases)
@@ -95,8 +99,12 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
   )
 
   const myQueue = useMemo(() => {
+    // A row is only actionable when a pending step exists. In-flight requests
+    // whose steps are still resolving (or whose final decision has not landed
+    // yet) have no pending step — they must not enter the queue, otherwise
+    // the sort and row render below crash on `undefined.dueAt`.
     const q = inFlight.filter(
-      (r) => supervisorMode || r.steps.some((s) => s.status === 'pending' && s.assigneeId === employeeId),
+      (r) => nextStep(r) !== undefined && (r.steps.some((s) => s.status === 'pending' && s.assigneeId === employeeId) || (supervisorMode && canViewEmployee(r.employeeId))),
     )
     const filtered = q.filter((r) => {
       if (typeFilter !== 'all' && r.leaveTypeId !== typeFilter) return false
@@ -105,9 +113,9 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
       return !qs || r.ref.toLowerCase().includes(qs) || name.includes(qs)
     })
     return filtered.sort((a, b) =>
-      nextStep(a)!.dueAt.localeCompare(nextStep(b)!.dueAt),
+      (nextStep(a)?.dueAt ?? '').localeCompare(nextStep(b)?.dueAt ?? ''),
     )
-  }, [inFlight, supervisorMode, employeeId, typeFilter, search])
+  }, [inFlight, supervisorMode, canViewEmployee, employeeId, typeFilter, search])
 
   const myQueueItems = usePaged(myQueue, 8)
 
@@ -122,10 +130,13 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
   const overdue = inFlight.filter((r) => (nextStep(r)?.dueAt ?? '9999-99-99') < TODAY).length
   const decided = requests.filter((r) => r.steps.some((s) => s.actedAt)).length
 
-  const doDecide = (r: LeaveRequest, decision: 'approved' | 'rejected' | 'returned', endDate?: string, comment?: string) => {
+  const doDecide = (r: LeaveRequest, decision: 'approved' | 'rejected' | 'returned', endDate?: string, comment?: string, sig?: { path?: string | null; hash?: string | null }) => {
     const step = nextStep(r)
     if (!step) return
-    decide(r.id, step.order, decision, comment || comments[r.id] || '(no comment)', endDate)
+    // Approvals always go through the signature ceremony; the collected
+    // attestation travels with the decision so the API can enforce it.
+    // Return/Reject carry no ceremony and the backend seals them unsigned.
+    decide(r.id, step.order, decision, comment || comments[r.id] || '(no comment)', endDate, sig?.path ?? undefined, sig?.hash ?? undefined)
     setComments((c) => ({ ...c, [r.id]: '' }))
   }
 
@@ -137,7 +148,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
     }
     items.push({ icon: Eye, label: 'View full details', onClick: () => setDetail(r) })
     if (canAct(r) && nextStep(r)) {
-      items.push({ icon: Check, label: 'Approve', onClick: () => { const step = nextStep(r)!; setApproveTarget({ request: r, stepOrder: step.order }); setApproveReturnDate(r.startDate >= TODAY ? r.startDate : TODAY); setApproveComment('') } })
+      items.push({ icon: Check, label: 'Approve', onClick: () => { const step = nextStep(r)!; setApproveTarget({ request: r, stepOrder: step.order }); setApproveReturnDate(r.startDate >= TODAY ? r.startDate : TODAY); setApproveComment(''); setSignatureStep('pending'); setSignatureData({ path: null, hash: null }) } })
       items.push({ icon: RotateCcw, label: 'Return for correction', onClick: () => doDecide(r, 'returned') })
       items.push({ icon: X, label: 'Reject', tone: 'danger', onClick: () => doDecide(r, 'rejected') })
     }
@@ -211,7 +222,8 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
               </thead>
               <tbody className="divide-y divide-border">
                 {myQueueItems.items.map((r) => {
-                  const step = nextStep(r)!
+                  const step = nextStep(r)
+                  if (!step) return null
                   const late = step.dueAt < TODAY
                   const ho = pendingHoFor(r)
                   return (
@@ -374,53 +386,78 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
 
       <Modal
         open={approveTarget !== null}
-        onClose={() => setApproveTarget(null)}
+        onClose={() => { setApproveTarget(null); setSignatureStep('pending'); setSignatureData({ path: null, hash: null }) }}
         title={approveTarget ? `Approve ${approveTarget.request.ref}` : 'Approve request'}
         subtitle="Grant the leave and set the return date — this fixes the number of days and records your decision."
         size="md"
-        footer={
-          <div className="flex items-center gap-2">
-            <Btn
-              variant="emerald"
-              disabled={!approveReturnDate}
-              onClick={() => {
-                if (!approveTarget) return
-                doDecide(approveTarget.request, 'approved', approveReturnDate, approveComment.trim() || undefined)
-                setApproveTarget(null)
-              }}
-            >
-              <Check className="w-3.5 h-3.5" /> Grant leave
-            </Btn>
-            <Btn variant="outline" onClick={() => setApproveTarget(null)}>Cancel</Btn>
-          </div>
-        }
       >
         {approveTarget && (
-          <div className="space-y-4">
-            <div className="rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2.5">
-              <p className="text-[12px] font-semibold text-foreground">
-                {typeOf(approveTarget.request.leaveTypeId)?.name ?? 'Leave'} · proposed from {fmtShort(approveTarget.request.startDate)}
-              </p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">{approveTarget.request.reason || 'No reason given.'}</p>
-            </div>
-            <TextInput
-              type="date"
-              label="Return to work date"
-              hint="The day the employee resumes duty; leave days are counted up to the day before."
-              value={approveReturnDate}
-              onChange={(e) => setApproveReturnDate(e.target.value)}
+          <>
+            {/* Signature step - required before granting leave */}
+            <ApprovalModal
+              open={signatureStep === 'pending'}
+              onClose={() => {
+                // Cancel/X on the signature dialog cancels the whole approval;
+                // setting the step back to "pending" would only reopen it.
+                setApproveTarget(null)
+                setSignatureStep('pending')
+                setSignatureData({ path: null, hash: null })
+              }}
+              allowOverwrite={true}
+              onSignatureComplete={async (path: string, hash: string) => {
+                setSignatureData({ path, hash })
+                setSignatureStep('completed')
+              }}
             />
-            <p className="text-[12px] font-mono text-foreground">
-              {approveReturnDate ? `≈ ${fmtShort(approveTarget.request.startDate)} → ${fmtShort(approveReturnDate)} · ${dayCount(approveTarget.request.startDate, approveReturnDate)} day${dayCount(approveTarget.request.startDate, approveReturnDate) === 1 ? '' : 's'}` : 'Set the return date to grant leave.'}
-            </p>
-            <TextArea
-              label="Decision comment (recorded)"
-              value={approveComment}
-              onChange={(e) => setApproveComment(e.target.value)}
-              rows={2}
-              placeholder="Optional comment for the applicant…"
-            />
-          </div>
+
+            {/* Grant leave - only show after signature is complete */}
+            {signatureStep === 'completed' && (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2.5">
+                  <p className="text-[12px] font-semibold text-foreground">
+                    {typeOf(approveTarget.request.leaveTypeId)?.name ?? 'Leave'} · proposed from {fmtShort(approveTarget.request.startDate)}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">{approveTarget.request.reason || 'No reason given.'}</p>
+                </div>
+                <TextInput
+                  type="date"
+                  label="Return to work date"
+                  hint="The day the employee resumes duty; leave days are counted up to the day before."
+                  value={approveReturnDate}
+                  onChange={(e) => setApproveReturnDate(e.target.value)}
+                />
+                <p className="text-[12px] font-mono text-foreground">
+                  {approveReturnDate ? `≈ ${fmtShort(approveTarget.request.startDate)} → ${fmtShort(approveReturnDate)} · ${dayCount(approveTarget.request.startDate, approveReturnDate)} day${dayCount(approveTarget.request.startDate, approveReturnDate) === 1 ? '' : 's'}` : 'Set the return date to grant leave.'}
+                </p>
+                <TextArea
+                  label="Decision comment (recorded)"
+                  value={approveComment}
+                  onChange={(e) => setApproveComment(e.target.value)}
+                  rows={2}
+                  placeholder="Optional comment for the applicant…"
+                />
+              </div>
+            )}
+
+            {signatureStep === 'completed' && (
+              <div className="flex items-center gap-2">
+                <Btn
+                  variant="emerald"
+                  disabled={!approveReturnDate}
+                  onClick={() => {
+                    if (!approveTarget) return
+                    doDecide(approveTarget.request, 'approved', approveReturnDate, approveComment.trim() || undefined, signatureData)
+                    setSignatureStep('pending')
+                    setSignatureData({ path: null, hash: null })
+                    setApproveTarget(null)
+                  }}
+                >
+                  <Check className="w-3.5 h-3.5" /> Grant leave
+                </Btn>
+                <Btn variant="outline" onClick={() => { setApproveTarget(null); setSignatureStep('pending'); setSignatureData({ path: null, hash: null }) }}>Cancel</Btn>
+              </div>
+            )}
+          </>
         )}
       </Modal>
     </div>

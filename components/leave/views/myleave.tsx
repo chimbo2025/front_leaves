@@ -17,15 +17,18 @@ import {
   Pagination,
   usePaged,
   Tabs,
+  Modal,
 } from '@/components/leave/shared'
+import { RequestDetail } from '@/components/leave/request-detail'
 
 export function MyLeaveView() {
-  const { employee, employeeId, requests, leaveTypes, policies, typeOf, balanceFor, eligibility, orgEligibility } = useLeave()
+  const { employee, employeeId, requests, leaveTypes, policies, typeOf, balanceFor, eligibility, orgEligibility, annualTypeId } = useLeave()
   const [tab, setTab] = useState('upcoming')
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
   const [from, setFrom] = useState(TODAY)
   const [to, setTo] = useState(addDays(TODAY, 365))
+  const [selected, setSelected] = useState<LeaveRequest | null>(null)
 
   const mine = requests.filter((r) => r.employeeId === employeeId)
 
@@ -65,7 +68,7 @@ export function MyLeaveView() {
         <StatCard icon={CalendarRange} label="Upcoming leaves" value={upcoming.length} hint="Approved future absences" tone="teal" />
         <StatCard icon={Sun} label="Days booked ahead" value={bookedDays} hint="Across all upcoming leaves" tone="amber" />
         <StatCard icon={Snowflake} label="Closest leave" value={next ? fmtShort(next.startDate) : '—'} hint={next ? `${typeOf(next.leaveTypeId)?.name ?? 'Leave'}` : 'Nothing planned'} tone="sky" />
-        <StatCard icon={Wallet} label="Annual balance" value={`${balanceFor(employeeId, 'lt1').remaining}d`} hint="Annual leave remaining" tone="emerald" />
+        <StatCard icon={Wallet} label="Annual balance" value={`${balanceFor(employeeId, annualTypeId).remaining}d`} hint="Annual leave remaining" tone="emerald" />
       </div>
 
       <Tabs
@@ -140,7 +143,12 @@ export function MyLeaveView() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {paged.items.map((r) => (
-                    <tr key={r.id} className="text-[13px] align-middle">
+                    <tr
+                      key={r.id}
+                      onClick={() => setSelected(r)}
+                      title={`${r.ref} — view detail and letter`}
+                      className="text-[13px] align-middle cursor-pointer hover:bg-accent/40"
+                    >
                       <td className="py-2.5 px-5"><TypePill leaveTypeId={r.leaveTypeId} showName /></td>
                       <td className="py-2.5 px-3 font-mono text-muted-foreground whitespace-nowrap">{r.ref}</td>
                       <td className="py-2.5 px-3 text-muted-foreground whitespace-nowrap">{fmt(r.startDate)} → {fmt(r.endDate)}</td>
@@ -197,7 +205,7 @@ export function MyLeaveView() {
                       ? `${bal.remaining} day${bal.remaining === 1 ? '' : 's'} remaining · max ${srv.max_days_per_request}d per request · notice ${srv.min_notice_days}d`
                       : srv?.blockers?.length
                         ? srv.blockers.join('; ')
-                        : `Needs ${pol.minTenureMonths} months tenure`}
+                        : `Needs ${pol?.minTenureMonths ?? '—'} months tenure`}
                   </p>
                 </li>
               )
@@ -217,7 +225,12 @@ export function MyLeaveView() {
             <>
               <ul className="space-y-2">
                 {pastPaged.items.map((r) => (
-                  <li key={r.id} className="flex items-center gap-3 rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2.5">
+                  <li
+                    key={r.id}
+                    onClick={() => setSelected(r)}
+                    title={`${r.ref} — view detail and letter`}
+                    className="flex items-center gap-3 rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2.5 cursor-pointer hover:bg-accent/40"
+                  >
                     <span className={cn('h-2.5 w-2.5 rounded-full shrink-0', typeOf(r.leaveTypeId)?.color ?? 'bg-zinc-400')} />
                     <div className="min-w-0 flex-1">
                       <p className="text-[12px] font-semibold text-foreground truncate">{typeOf(r.leaveTypeId)?.name}</p>
@@ -232,6 +245,20 @@ export function MyLeaveView() {
           )}
         </Panel>
       )}
+
+      <Modal
+        open={selected !== null}
+        onClose={() => setSelected(null)}
+        title={selected ? `Ombi — ${selected.ref}` : 'Ombi'}
+        subtitle={
+          selected
+            ? `${typeOf(selected.leaveTypeId)?.name ?? ''} · ${selected.days ?? '—'} siku · hali: ${selected.status.replace(/_/g, ' ')}`
+            : ''
+        }
+        size="xl"
+      >
+        {selected && <RequestDetail request={selected} />}
+      </Modal>
     </div>
   )
 }

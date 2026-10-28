@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Plus, ShieldCheck, Eye, Play, History, Power, ArrowRight, Handshake, Hourglass, UserRoundPlus, ScrollText, Route } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { TODAY, addDays, fmtShort, getEmployee, roleLabels, type ApproverRole } from '@/lib/leave'
@@ -31,14 +31,16 @@ const SCOPES: { value: string; label: string }[] = [
   { value: 'ALL', label: 'All my approval authority' },
 ]
 
-const AUTHORITY_HOLDERS = ['e1', 'e3', 'e4', 'e5', 'e6']
+const APPROVER_ROLE_CODES: ApproverRole[] = ['SUPERVISOR', 'DEPT_HEAD', 'ZONAL_HEAD', 'HR', 'FINAL_AUTHORITY']
 
 export function DelegationsView() {
-  const { delegations, createDelegation, setDelegationActive, supervisorMode, employees } = useLeave()
+  const { delegations, createDelegation, setDelegationActive, employees, can } = useLeave()
+  const canCreateDelegation = can('delegations', 'create')
+  const canUpdateDelegation = can('delegations', 'update')
   const [tab, setTab] = useState('register')
   const [open, setOpen] = useState(false)
-  const [delegatorId, setDelegatorId] = useState('e5')
-  const [delegateId, setDelegateId] = useState('e7')
+  const [delegatorId, setDelegatorId] = useState('')
+  const [delegateId, setDelegateId] = useState('')
   const [scope, setScope] = useState('DEPT_HEAD')
   const [start, setStart] = useState(TODAY)
   const [end, setEnd] = useState(addDays(TODAY, 30))
@@ -47,6 +49,22 @@ export function DelegationsView() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [detail, setDetail] = useState<(typeof delegations)[number] | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<(typeof delegations)[number] | null>(null)
+
+  // Employees who hold an approver role — they can delegate their authority.
+  const authorityHolders = useMemo(
+    () => employees.filter((e) => e.roleIds.some((r) => APPROVER_ROLE_CODES.includes(r as ApproverRole))),
+    [employees],
+  )
+
+  // Derive defaults from the current employee list (no hardcoded e5/e7).
+  const delegatorDefault = authorityHolders[0]?.id ?? ''
+  const delegateDefault = employees.find((e) => e.id !== delegatorDefault)?.id ?? ''
+
+  // Keep defaults in sync when the modal opens or the employee list changes.
+  useMemo(() => {
+    if (open && !authorityHolders.some((h) => h.id === delegatorId)) setDelegatorId(delegatorDefault)
+    if (open && !employees.some((e) => e.id === delegateId)) setDelegateId(delegateDefault)
+  }, [open, authorityHolders, employees, delegatorId, delegateId, delegatorDefault, delegateDefault])
 
   const activeCount = delegations.filter((d) => d.active).length
   const revokedCount = delegations.length - activeCount
@@ -74,14 +92,20 @@ export function DelegationsView() {
     .sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0))
   const paged = usePaged(visible, 8)
 
+  // View details is safe for every viewer; (de)activation needs the matching
+  // code (revoke → update, reactivate → create, which mints a new grant).
   const buildMenu = (d: (typeof delegations)[number]): RowMenuItem[] => [
     { icon: Eye, label: 'View details', onClick: () => setDetail(d) },
-    {
-      icon: d.active ? Power : Play,
-      label: d.active ? 'Deactivate / revoke' : 'Reactivate',
-      tone: d.active ? 'danger' : 'default',
-      onClick: () => (d.active ? setRevokeTarget(d) : setDelegationActive(d.id, true)),
-    },
+    ...((d.active && canUpdateDelegation) || (!d.active && canCreateDelegation)
+      ? [
+          {
+            icon: d.active ? Power : Play,
+            label: d.active ? 'Deactivate / revoke' : 'Reactivate',
+            tone: (d.active ? 'danger' : 'default') as 'danger' | 'default',
+            onClick: () => (d.active ? setRevokeTarget(d) : setDelegationActive(d.id, true)),
+          } as RowMenuItem,
+        ]
+      : []),
   ]
 
   return (
@@ -90,9 +114,11 @@ export function DelegationsView() {
         title="Delegations"
         subtitle="An approver can delegate authority for a period while the system preserves the original authority and full audit history."
         actions={
-          <Btn onClick={() => setOpen(true)}>
-            <Plus className="w-4 h-4" /> Create delegation
-          </Btn>
+          canCreateDelegation ? (
+            <Btn onClick={() => setOpen(true)}>
+              <Plus className="w-4 h-4" /> Create delegation
+            </Btn>
+          ) : undefined
         }
       />
 
@@ -162,17 +188,17 @@ export function DelegationsView() {
                     <td className="py-3 px-5">
                       <div className="flex items-center gap-2">
                         <Avatar id={d.delegatorId} size="sm" />
-                        <span className="font-semibold text-foreground whitespace-nowrap">{getEmployee(d.delegatorId).name}</span>
+                        <span className="font-semibold text-foreground whitespace-nowrap">{getEmployee(d.delegatorId)?.name ?? d.delegatorId}</span>
                         <ArrowRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                         <Avatar id={d.delegateId} size="sm" />
-                        <span className="font-semibold text-foreground whitespace-nowrap">{getEmployee(d.delegateId).name}</span>
+                        <span className="font-semibold text-foreground whitespace-nowrap">{getEmployee(d.delegateId)?.name ?? d.delegateId}</span>
                       </div>
                     </td>
                     <td className="py-3 px-3">
                       <span className="text-[12px] text-foreground">{roleLabels[d.scope as ApproverRole] ?? d.scope}</span>
                     </td>
                     <td className="py-3 px-3 text-muted-foreground whitespace-nowrap">{fmtShort(d.startDate)} → {fmtShort(d.endDate)}</td>
-                    <td className="py-3 px-3 text-muted-foreground hidden md:table-cell">{getEmployee(d.authorizedBy).name}</td>
+                    <td className="py-3 px-3 text-muted-foreground hidden md:table-cell">{getEmployee(d.authorizedBy)?.name ?? d.authorizedBy}</td>
                     <td className="py-3 px-3">
                       {d.active ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-900 px-2 py-0.5 text-[10px] font-semibold">
@@ -185,7 +211,7 @@ export function DelegationsView() {
                       )}
                     </td>
                     <td className="py-3 px-3 text-right">
-                      {supervisorMode && <RowMenu items={buildMenu(d)} label="Manage" />}
+                      <RowMenu items={buildMenu(d)} label="Manage" />
                     </td>
                   </tr>
                 ))}
@@ -230,8 +256,8 @@ export function DelegationsView() {
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <SelectInput label="Delegator (granting authority)" hint="Only current authority holders are shown" value={delegatorId} onChange={(e) => setDelegatorId(e.target.value)}>
-            {employees.filter((e) => AUTHORITY_HOLDERS.includes(e.id)).map((e) => (
-              <option key={e.id} value={e.id}>{e.name} — {e.title}</option>
+            {authorityHolders.map((e) => (
+              <option key={e.id} value={e.id}>{e.name} - {e.title}</option>
             ))}
           </SelectInput>
           <SelectInput label="Delegate (receives authority)" value={delegateId} onChange={(e) => setDelegateId(e.target.value)}>
@@ -290,8 +316,8 @@ export function DelegationsView() {
         confirmLabel="Revoke"
         message={
           <p>
-            Authority delegated by <span className="font-semibold text-foreground">{revokeTarget ? getEmployee(revokeTarget.delegatorId).name : ''}</span> to{' '}
-            <span className="font-semibold text-foreground">{revokeTarget ? getEmployee(revokeTarget.delegateId).name : ''}</span> will be restored to the
+            Authority delegated by <span className="font-semibold text-foreground">{revokeTarget ? getEmployee(revokeTarget.delegatorId)?.name ?? revokeTarget.delegatorId : ''}</span> to{' '}
+            <span className="font-semibold text-foreground">{revokeTarget ? getEmployee(revokeTarget.delegateId)?.name ?? revokeTarget.delegateId : ''}</span> will be restored to the
             original holder. The revocation is written to the audit trail.
           </p>
         }

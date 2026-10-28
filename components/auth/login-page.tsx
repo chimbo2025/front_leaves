@@ -15,7 +15,7 @@ export function LoginPage() {
   const router = useRouter()
   const { status, login } = useAuth()
 
-  const [email, setEmail] = React.useState('')
+  const [identifier, setIdentifier] = React.useState('')
   const [password, setPassword] = React.useState('')
   const [showPassword, setShowPassword] = React.useState(false)
   const [submitting, setSubmitting] = React.useState(false)
@@ -32,7 +32,7 @@ export function LoginPage() {
     setError(null)
     setSubmitting(true)
     try {
-      await login(email.trim(), password)
+      await login(identifier.trim(), password)
       router.replace('/')
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to sign in. Is the backend running?')
@@ -59,7 +59,7 @@ export function LoginPage() {
           <div className="pointer-events-none absolute -bottom-24 -left-16 h-72 w-72 rounded-full bg-cyan-400/20 blur-3xl" />
 
           <span className="inline-flex w-fit items-center gap-2 rounded-full border border-white/25 bg-white/10 px-4 py-1.5 text-[13px] font-semibold tracking-wide">
-            <Landmark className="h-4 w-4" /> Lango Rasmi la Serikali
+            <Landmark className="h-4 w-4" /> Official Government Portal
           </span>
 
           <div className="mt-3">
@@ -83,7 +83,7 @@ export function LoginPage() {
               <ShieldCheck className="h-[18px] w-[18px] shrink-0 text-emerald-300" /> Uwazi na usalama wa kumbukumbu
             </li>
             <li className="flex items-center gap-3 text-sm text-emerald-50">
-              <Lock className="h-[18px] w-[18px] shrink-0 text-emerald-300" /> Mfumo salama wa Serikali
+              <Lock className="h-[18px] w-[18px] shrink-0 text-emerald-300" /> Likizo kwa wafanyakazi wote
             </li>
           </ul>
         </div>
@@ -112,18 +112,18 @@ export function LoginPage() {
 
           <form onSubmit={onSubmit} className="mt-6 w-full max-w-sm space-y-4 text-left">
             <div className="space-y-2">
-              <Label htmlFor="email">Barua pepe (email)</Label>
+              <Label htmlFor="identifier">Barua pepe au jina la mtumiaji</Label>
               <div className="relative">
                 <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
+                  id="identifier"
+                  type="text"
+                  autoComplete="username"
                   required
-                  placeholder="you@dpp.go.tz"
+                  placeholder="you@dpp.go.tz au u8"
                   className="pl-9"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
                 />
               </div>
             </div>

@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { Plus_Jakarta_Sans, Fraunces, Geist_Mono } from 'next/font/google'
+import { Plus_Jakarta_Sans, Fraunces } from 'next/font/google'
 import './globals.css'
 import { ThemeProvider } from '@/components/theme-provider'
 import { Toaster } from '@/components/ui/sonner'
@@ -13,13 +13,8 @@ const plusJakarta = Plus_Jakarta_Sans({
 const fraunces = Fraunces({
   subsets: ['latin'],
   variable: '--font-serif',
-  weight: ['500', '600', '700'],
+  weight: ['500', '600'],
   display: 'swap',
-})
-
-const geistMono = Geist_Mono({
-  subsets: ['latin'],
-  variable: '--font-mono',
 })
 
 export const metadata: Metadata = {
@@ -38,7 +33,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${plusJakarta.variable} ${fraunces.variable} ${geistMono.variable}`}
+      className={`${plusJakarta.variable} ${fraunces.variable}`}
     >
       <body>
         <ThemeProvider>{children}

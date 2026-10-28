@@ -21,34 +21,61 @@ import {
 } from 'lucide-react'
 import { useLeave } from '@/components/leave/leave-context'
 
-const NAV = [
+interface NavItem {
+  id: string
+  label: string
+  sw: string
+  icon: typeof LayoutDashboard
+  /**
+   * Permission required to see this page. `null` means every signed-in
+   * employee may open it. Any function form also consults the resolved
+   * zone/department scope, so a Zonal Head does not see Admin & Org.
+   */
+  requires?: string | null
+  visible?: (ctx: { hasPerm: (code: string) => boolean; canViewEmployee: (id: string) => boolean }) => boolean
+}
+
+const NAV: { section: string; items: NavItem[] }[] = [
   {
     section: 'Main',
     items: [
-      { id: 'dashboard', label: 'Dashboard', sw: 'Dashibodi', icon: LayoutDashboard },
-      { id: 'myleave', label: 'My Leave', sw: 'Likizo yangu', icon: CalendarRange },
-      { id: 'requests', label: 'Leave Requests', sw: 'Maombi', icon: CalendarClock },
-      { id: 'approvals', label: 'Approvals', sw: 'Idhini', icon: ClipboardCheck },
-      { id: 'calendar', label: 'Leave Calendar', sw: 'Kalenda', icon: CalendarDays },
+      { id: 'dashboard', label: 'Dashboard', sw: 'Dashibodi', icon: LayoutDashboard, requires: null },
+      { id: 'myleave', label: 'My Leave', sw: 'Likizo yangu', icon: CalendarRange, requires: null },
+      { id: 'requests', label: 'Leave Requests', sw: 'Maombi', icon: CalendarClock, requires: 'requests.view' },
+      {
+        id: 'approvals',
+        label: 'Approvals',
+        sw: 'Idhini',
+        icon: ClipboardCheck,
+        // requires is null on purpose: approvers reach this surface through
+        // either code, and ANDing a single requires with the OR below hid
+        // pure approve_zone holders. visible() is the capability mapping.
+        requires: null,
+        visible: ({ hasPerm }) => hasPerm('requests.approve') || hasPerm('requests.approve_zone'),
+      },
+      { id: 'calendar', label: 'Leave Calendar', sw: 'Kalenda', icon: CalendarDays, requires: 'requests.view' },
     ],
   },
   {
     section: 'HR & Policy',
     items: [
-      { id: 'policies', label: 'Leave Policies', sw: 'Sera', icon: ScrollText },
-      { id: 'workflows', label: 'Approval Workflows', sw: 'Michakato ya idhini', icon: ClipboardCheck },
-      { id: 'documents', label: 'Documents', sw: 'Hati', icon: FileText },
-      { id: 'delegations', label: 'Delegations', sw: 'Udhamini', icon: Handshake },
-      { id: 'cases', label: 'Case Handovers', sw: 'Uhamishaji wa kesi', icon: FolderKanban },
+      { id: 'policies', label: 'Leave Policies', sw: 'Sera', icon: ScrollText, requires: 'policies.view' },
+      { id: 'workflows', label: 'Approval Workflows', sw: 'Michakato ya idhini', icon: ClipboardCheck, requires: 'approval_workflows.view' },
+      { id: 'documents', label: 'Documents', sw: 'Hati', icon: FileText, requires: 'documents.view' },
+      { id: 'delegations', label: 'Delegations', sw: 'Udhamini', icon: Handshake, requires: 'delegations.view' },
+      { id: 'cases', label: 'Case Handovers', sw: 'Uhamishaji wa kesi', icon: FolderKanban, requires: 'case_handovers.view' },
     ],
   },
   {
     section: 'Oversight',
     items: [
-      { id: 'notifications', label: 'Notifications', sw: 'Taarifa', icon: Bell },
-      { id: 'reports', label: 'Reports', sw: 'Ripoti', icon: BarChart3 },
-      { id: 'audit', label: 'Audit Trail', sw: 'Kumbukumbu', icon: History },
-      { id: 'settings', label: 'Admin & Org', sw: 'Usimamizi', icon: Settings },
+      { id: 'notifications', label: 'Notifications', sw: 'Taarifa', icon: Bell, requires: null },
+      // Reports admits anyone with a report-related code (legacy, finance,
+      // payment-oversight or own-history); each tab and table re-checks its
+      // own gate and locks otherwise. The backend stays authoritative.
+      { id: 'reports', label: 'Reports', sw: 'Ripoti', icon: BarChart3, requires: null, visible: ({ hasPerm }) => hasPerm('reports.view') || hasPerm('reports.view_financial') || hasPerm('leave_payments.view_cross_zone') || hasPerm('reports.view_own') },
+      { id: 'audit', label: 'Audit Trail', sw: 'Kumbukumbu', icon: History, requires: 'admin.view' },
+      { id: 'settings', label: 'Admin & Org', sw: 'Usimamizi', icon: Settings, requires: 'admin.view' },
     ],
   },
 ]
@@ -60,7 +87,7 @@ interface SidebarProps {
 
 export function LeaveSidebar({ activeView, onNavigate }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
-  const { pendingApprovals, notifications, employeeId, supervisorMode } = useLeave()
+  const { pendingApprovals, notifications, employeeId, supervisorMode, hasPerm, canViewEmployee } = useLeave()
 
   const myPending = pendingApprovals.filter(
     (r) => supervisorMode || r.steps.some((s) => s.status === 'pending' && s.assigneeId === employeeId),
@@ -69,6 +96,17 @@ export function LeaveSidebar({ activeView, onNavigate }: SidebarProps) {
 
   const badgeFor = (id: string) =>
     id === 'approvals' ? (supervisorMode ? pendingApprovals.length : myPending) : id === 'notifications' ? unread : 0
+
+  // Hide pages the backend would refuse, so the nav reflects real capability
+  // instead of offering a 403 on click.
+  const sections = NAV.map((section) => ({
+    ...section,
+    items: section.items.filter(
+      (item) =>
+        (item.requires === undefined || item.requires === null || hasPerm(item.requires)) &&
+        (item.visible ? item.visible({ hasPerm, canViewEmployee }) : true),
+    ),
+  })).filter((section) => section.items.length > 0)
 
   return (
     <aside
@@ -90,7 +128,7 @@ export function LeaveSidebar({ activeView, onNavigate }: SidebarProps) {
       </div>
 
       <nav className="flex-1 overflow-y-auto py-3 space-y-1 px-2">
-        {NAV.map((section) => (
+        {sections.map((section) => (
           <div key={section.section} className="mb-4">
             {!collapsed && (
               <p className="text-[10px] font-semibold text-muted-foreground px-2 mb-2 tracking-widest">

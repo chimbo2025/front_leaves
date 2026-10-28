@@ -20,6 +20,7 @@ import {
   Pagination,
   usePaged,
   Tabs,
+  ConfirmModal,
   type RowMenuItem,
 } from '@/components/leave/shared'
 
@@ -87,6 +88,7 @@ export function PoliciesView() {
     can,
     updatePolicy,
     updateLeaveType,
+    deleteLeaveType,
     updateWorkflow,
     createLeaveType,
   } = useLeave()
@@ -99,6 +101,7 @@ export function PoliciesView() {
   const [editingPolicy, setEditingPolicy] = useState<LeavePolicy | null>(null)
   const [editingWf, setEditingWf] = useState<string | null>(null)
   const [editingType, setEditingType] = useState<string | null>(null)
+  const [deletingType, setDeletingType] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [wfSteps, setWfSteps] = useState<StepDraft[]>([])
   const [typeDraft, setTypeDraft] = useState({ name: '', swahili: '', short: '', description: '', color: 'bg-emerald-500', paid: true })
@@ -111,7 +114,7 @@ export function PoliciesView() {
 
   const rows = leaveTypes.map((lt) => {
     const policy = currentPolicyFor(lt.id)
-    const wf = workflowDefs.find((w) => w.leaveTypeId === lt.id)
+    const wf = workflowDefs.find((w) => w.leaveTypeId === lt.id && w.isActive !== false) ?? workflowDefs.find((w) => w.leaveTypeId === lt.id)
     return { lt, policy, wf }
   })
 
@@ -164,7 +167,7 @@ export function PoliciesView() {
   }
 
   const startWfEdit = (leaveTypeId: string) => {
-    const wf = workflowDefs.find((w) => w.leaveTypeId === leaveTypeId)
+    const wf = workflowDefs.find((w) => w.leaveTypeId === leaveTypeId && w.isActive !== false) ?? workflowDefs.find((w) => w.leaveTypeId === leaveTypeId)
     setWfSteps((wf?.steps ?? []).map((s) => ({ ...s })))
     setEditingWf(leaveTypeId)
   }
@@ -244,6 +247,9 @@ export function PoliciesView() {
       items.push({ icon: Pencil, label: 'Edit leave type', onClick: () => startTypeEdit(leaveTypeId) })
       items.push({ icon: ShieldCheck, label: 'Edit policy', onClick: () => { const p = currentPolicyFor(leaveTypeId); if (p) startPolicyEdit(p) } })
       items.push({ icon: Workflow, label: 'Edit workflow', onClick: () => startWfEdit(leaveTypeId) })
+    }
+    if (can('admin', 'delete')) {
+      items.push({ icon: Trash2, label: 'Delete leave type', tone: 'danger', onClick: () => setDeletingType(leaveTypeId) })
     }
     return items
   }
@@ -521,7 +527,7 @@ export function PoliciesView() {
         open={editingWf !== null}
         onClose={() => setEditingWf(null)}
         title={editingWf ? `Workflow — ${typeOf(editingWf)?.name}` : 'Workflow'}
-        subtitle="Order, role, SLA and a short rule note. New submissions resolve against this chain."
+        subtitle="Order, role and a short rule note. New submissions resolve against this chain."
         size="lg"
         footer={
           <Btn onClick={saveWorkflow} disabled={wfSteps.length === 0}>
@@ -598,7 +604,7 @@ export function PoliciesView() {
                   {viewingRow.wf.steps.map((s, i) => (
                     <div key={i} className="flex items-center gap-1.5">
                       <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-foreground">
-                        {roleLabels[s.role]} <span className="text-muted-foreground text-[10px]">· {s.slaDays}d SLA</span>
+                        {roleLabels[s.role]} <span className="text-muted-foreground text-[10px]">· {s.note}</span>
                       </span>
                       {i < viewingRow.wf!.steps.length - 1 && <span className="text-muted-foreground text-[11px]">→</span>}
                     </div>
@@ -609,6 +615,23 @@ export function PoliciesView() {
           </div>
         )}
       </Modal>
+
+      <ConfirmModal
+        open={deletingType !== null}
+        onClose={() => setDeletingType(null)}
+        title="Delete this leave type?"
+        confirmLabel="Delete leave type"
+        tone="danger"
+        message={
+          <p>
+            {deletingType ? `“${typeOf(deletingType)?.name ?? deletingType}” will be removed permanently with its policy versions and approval workflow.` : ''}{' '}
+            Types carrying history — leave requests, balance adjustments, plans or waivers — cannot be deleted; the API refuses with a count so nothing breaks.
+          </p>
+        }
+        onConfirm={() => {
+          if (deletingType) void deleteLeaveType(deletingType)
+        }}
+      />
     </div>
   )
 }

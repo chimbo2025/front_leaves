@@ -1,25 +1,41 @@
 'use client'
 
+import * as React from 'react'
 import { useEffect, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
 import { AuthProvider, useAuth } from '@/lib/auth'
 import { LeaveProvider } from '@/components/leave/leave-context'
 import { LeaveSidebar } from '@/components/leave/leave-sidebar'
 import { LeaveHeader } from '@/components/leave/leave-header'
-import { DashboardView } from '@/components/leave/views/dashboard'
-import { MyLeaveView } from '@/components/leave/views/myleave'
-import { RequestsView } from '@/components/leave/views/requests'
-import { ApprovalsView } from '@/components/leave/views/approvals'
-import { WorkflowsView } from '@/components/leave/views/workflows'
-import { CalendarView } from '@/components/leave/views/calendar'
-import { PoliciesView } from '@/components/leave/views/policies'
-import { DocumentsView } from '@/components/leave/views/documents'
-import { DelegationsView } from '@/components/leave/views/delegations'
-import { CasesView } from '@/components/leave/views/cases'
-import { NotificationsView } from '@/components/leave/views/notifications'
-import { ReportsView } from '@/components/leave/views/reports'
-import { AuditView } from '@/components/leave/views/audit'
-import { SettingsView } from '@/components/leave/views/settings'
+
+function ViewSkeleton() {
+  return (
+    <div className="flex h-full items-center justify-center p-8">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-teal-600 border-t-transparent" />
+    </div>
+  )
+}
+
+// Views load on demand (client-only) so the first paint ships only the shell —
+// dashboard, sidebar, header — instead of all 14 view modules up front.
+const lazy = <T extends object>(loader: () => Promise<{ default: React.ComponentType<T> }>) =>
+  dynamic(loader, { ssr: false, loading: () => <ViewSkeleton /> })
+
+const DashboardView = lazy<{ onNavigate: (v: string) => void }>(() => import('@/components/leave/views/dashboard').then((m) => ({ default: m.DashboardView })))
+const MyLeaveView = lazy<Record<string, never>>(() => import('@/components/leave/views/myleave').then((m) => ({ default: m.MyLeaveView })))
+const RequestsView = lazy<Record<string, never>>(() => import('@/components/leave/views/requests').then((m) => ({ default: m.RequestsView })))
+const ApprovalsView = lazy<{ onNavigate: (v: string) => void }>(() => import('@/components/leave/views/approvals').then((m) => ({ default: m.ApprovalsView })))
+const WorkflowsView = lazy<{ onNavigate: (v: string) => void }>(() => import('@/components/leave/views/workflows').then((m) => ({ default: m.WorkflowsView })))
+const CalendarView = lazy<Record<string, never>>(() => import('@/components/leave/views/calendar').then((m) => ({ default: m.CalendarView })))
+const PoliciesView = lazy<Record<string, never>>(() => import('@/components/leave/views/policies').then((m) => ({ default: m.PoliciesView })))
+const DocumentsView = lazy<Record<string, never>>(() => import('@/components/leave/views/documents').then((m) => ({ default: m.DocumentsView })))
+const DelegationsView = lazy<Record<string, never>>(() => import('@/components/leave/views/delegations').then((m) => ({ default: m.DelegationsView })))
+const CasesView = lazy<Record<string, never>>(() => import('@/components/leave/views/cases').then((m) => ({ default: m.CasesView })))
+const NotificationsView = lazy<Record<string, never>>(() => import('@/components/leave/views/notifications').then((m) => ({ default: m.NotificationsView })))
+const ReportsView = lazy<Record<string, never>>(() => import('@/components/leave/views/reports').then((m) => ({ default: m.ReportsView })))
+const AuditView = lazy<Record<string, never>>(() => import('@/components/leave/views/audit').then((m) => ({ default: m.AuditView })))
+const SettingsView = lazy<Record<string, never>>(() => import('@/components/leave/views/settings').then((m) => ({ default: m.SettingsView })))
 
 type View =
   | 'dashboard'

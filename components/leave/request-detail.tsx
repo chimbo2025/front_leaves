@@ -1,17 +1,19 @@
 'use client'
 
-import { ShieldCheck, Clock, FileText, Lock } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { ShieldCheck, Clock, FileText, Lock, CheckCircle, Printer, MailOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   getEmployee,
-  getLeaveType,
   getZone,
   getDept,
   policyEffectiveAt,
   fmtShort,
   type LeaveRequest,
 } from '@/lib/leave'
-import { Avatar, StatusPill, TypePill } from '@/components/leave/shared'
+import { Avatar, StatusPill, TypePill, Modal, Btn } from '@/components/leave/shared'
+import { useLeave } from '@/components/leave/leave-context'
+import { LetterView, printLetter } from '@/components/leave/letter-view'
 
 const STEP_TONE: Record<string, { dot: string; text: string; bg: string }> = {
   approved: { dot: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-950/40' },
@@ -22,23 +24,46 @@ const STEP_TONE: Record<string, { dot: string; text: string; bg: string }> = {
 }
 
 export function RequestDetail({ request, isHr = false }: { request: LeaveRequest; isHr?: boolean }) {
+  // The employee, leave type and policy all live in the database now. A row
+  // can be missing (a deleted staff member, a removed leave type, a type with
+  // no published policy) — render gracefully instead of throwing in render.
   const emp = getEmployee(request.employeeId)
-  const lt = getLeaveType(request.leaveTypeId)
   const policy = policyEffectiveAt(request.leaveTypeId, request.submittedAt ?? request.createdAt)
-  const zone = getZone(emp.zoneId)
-  const dept = getDept(emp.departmentId)
+  const zone = emp ? getZone(emp.zoneId) : undefined
+  const dept = emp ? getDept(emp.departmentId) : undefined
   const visibleDocs = isHr ? request.documents : request.documents.filter((d) => !d.restricted)
+
+  const [showLetter, setShowLetter] = useState(false)
+  const letterHostRef = useRef<HTMLDivElement>(null)
+
+  const printLetterNow = () => {
+    const page = letterHostRef.current?.querySelector<HTMLElement>('.letter-page')
+    if (page) printLetter(page)
+  }
 
   return (
     <div className="space-y-5">
+      {/* Swahili application letter — screen view + isolated-iframe print */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-warm dark:bg-muted/30 px-3.5 py-2.5">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <MailOpen className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <p className="text-[11px] text-muted-foreground truncate">
+            Barua ya ombi (Swahili) — sahihi na chapa ya hali ya sasa, tayari kuchapisha.
+          </p>
+        </div>
+        <Btn variant="outline" onClick={() => setShowLetter(true)}>
+          <FileText className="h-3.5 w-3.5" /> Angalia barua
+        </Btn>
+      </div>
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="col-span-2 rounded-xl border border-border bg-secondary/50 p-3.5">
           <div className="flex items-center gap-3">
-            <Avatar id={emp.id} size="lg" />
+            <Avatar id={emp?.id ?? request.employeeId} size="lg" />
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-foreground leading-tight truncate">{emp.name}</p>
-              <p className="text-[12px] text-muted-foreground truncate">{emp.title}</p>
-              <p className="text-[11px] text-muted-foreground truncate">{zone.name} · {dept.name}</p>
+              <p className="text-sm font-semibold text-foreground leading-tight truncate">{emp?.name ?? request.employeeId}</p>
+              <p className="text-[12px] text-muted-foreground truncate">{emp?.title ?? '—'}</p>
+              <p className="text-[11px] text-muted-foreground truncate">{zone?.name ?? '—'} · {dept?.name ?? '—'}</p>
             </div>
           </div>
         </div>
@@ -50,7 +75,7 @@ export function RequestDetail({ request, isHr = false }: { request: LeaveRequest
         <div className="rounded-xl border border-border bg-secondary/50 p-3.5">
           <p className="text-[11px] text-muted-foreground">Leave type</p>
           <div className="mt-1"><TypePill leaveTypeId={request.leaveTypeId} showName /></div>
-          <p className="text-[11px] text-muted-foreground mt-1.5">Policy v{policy.version}</p>
+          <p className="text-[11px] text-muted-foreground mt-1.5">{policy ? `Policy v${policy.version}` : 'No policy on file'}</p>
         </div>
       </div>
 
@@ -130,7 +155,7 @@ export function RequestDetail({ request, isHr = false }: { request: LeaveRequest
                   </div>
                   <p className="text-[12px] text-muted-foreground mt-0.5">
                     {s.assigneeName} {s.via !== 'direct' && <span className="text-amber-600 dark:text-amber-400">(via delegation: {s.via})</span>}
-                    {' · '}SLA {s.slaDays}d · due {fmtShort(s.dueAt)}
+                    {' · '}Due {fmtShort(s.dueAt)}
                   </p>
                   {s.comments && (
                     <p className="text-[12px] text-foreground mt-1.5 border-t border-border/60 pt-1.5">
@@ -144,6 +169,51 @@ export function RequestDetail({ request, isHr = false }: { request: LeaveRequest
           })}
         </ol>
       </div>
+
+      {/* Approval signature display */}
+      {request.signaturePath && (
+        <div className="rounded-xl border border-border p-4 mt-4">
+          <div className="flex items-center gap-1.5 mb-3">
+            <CheckCircle className="h-3.5 w-3.5 text-emerald-600" />
+            <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">Approval signature</p>
+          </div>
+          <div className="relative">
+            <img
+              src={request.signaturePath}
+              alt="Approval signature"
+              className="w-full max-w-[200px] rounded-lg border border-border"
+              style={{ maxHeight: '300px', objectFit: 'contain' }}
+            />
+            {!isHr && request.signatureHash && (
+              <div className="absolute top-2 right-2 bg-emerald-500/10 text-emerald-600 text-xs px-2 py-1 rounded">
+                <CheckCircle className="w-2.5 h-2.5 inline mr-1" /> Verified
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <Modal
+        open={showLetter}
+        onClose={() => setShowLetter(false)}
+        title={`Barua ya Ombi ya Likizo — ${request.ref}`}
+        subtitle="Hati rasmi ya maombi kwa Kiswahili — inaonyesha hali ya sasa, sahihi na sehemu ya uidhinishaji."
+        size="xl"
+        footer={
+          <div className="flex items-center justify-between w-full gap-3">
+            <p className="text-[11px] text-muted-foreground hidden sm:block">
+              Imeandaliwa na Mfumo wa Usimamizi wa Likizo — DPP Zanzibar
+            </p>
+            <Btn onClick={printLetterNow}>
+              <Printer className="h-3.5 w-3.5" /> Chapisha / Print
+            </Btn>
+          </div>
+        }
+      >
+        <div ref={letterHostRef} className="overflow-x-auto pb-1">
+          <LetterView request={request} />
+        </div>
+      </Modal>
     </div>
   )
 }

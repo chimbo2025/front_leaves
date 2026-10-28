@@ -17,7 +17,6 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
-  EMPLOYEES,
   TODAY,
   addDays,
   fmtShort,
@@ -51,16 +50,19 @@ const TIP_TONE: Record<string, string> = {
 }
 
 export function DashboardView({ onNavigate }: { onNavigate?: (v: string) => void }) {
-  const { employee, employeeId, requests, supervisorMode, can, policies } = useLeave()
+  const { employee, employeeId, requests, supervisorMode, can, canViewEmployee, policies, leaveTypes, annualTypeId, employees, allZones, typeOf } = useLeave()
   const [detail, setDetail] = useState<LeaveRequest | null>(null)
 
-  const zoneName = employee.zoneId === 'z4' ? 'Pemba Coordination' : employee.zoneId === 'z1' ? 'Headquarters' : 'Regional'
+  const zone = allZones.find((z) => z.id === employee.zoneId)
+  const zoneName = zone?.isHQ ? 'Headquarters' : zone?.isPemba ? 'Pemba Coordination' : 'Regional'
   const monthly = [
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December',
-  ][new Date('2026-09-09').getMonth()]
+  ][new Date().getMonth()]
 
-  const starred = ['lt1', 'lt2', 'lt5', 'lt3']
+  // Show the first four leave types from the catalogue (not hardcoded IDs).
+  // The catalogue is database-owned now, so its contents reflect what the admin has created.
+  const starred = leaveTypes.slice(0, 4).map((t) => t.id)
   const balances = starred.map((id) => ({ id, bal: balanceOf(employeeId, id, requests) }))
 
   const myRequests = requests
@@ -70,13 +72,13 @@ export function DashboardView({ onNavigate }: { onNavigate?: (v: string) => void
   const historyPaged = usePaged(myRequests, 6)
 
   const active = myRequests.filter((r) => r.status === 'approved' || r.status === 'under_review')
-  const tips = recommendationsFor(employee, 'lt1', requests)
+  const tips = recommendationsFor(employee, annualTypeId, requests)
   const taskCount = requests.filter(
     (r) => supervisorMode || r.steps.some((s) => s.status === 'pending' && s.assigneeId === employeeId),
   ).length
 
-  const annualPolicy = policyEffectiveAt('lt1', TODAY, policies)
-  const annualBal = balanceOf(employeeId, 'lt1', requests)
+  const annualPolicy = policyEffectiveAt(annualTypeId, TODAY, policies)
+  const annualBal = balanceOf(employeeId, annualTypeId, requests)
   const minNotice = annualPolicy?.minNoticeDays ?? 14
   const earliestEligible = addDays(TODAY, minNotice)
 
@@ -145,7 +147,7 @@ export function DashboardView({ onNavigate }: { onNavigate?: (v: string) => void
           </div>
 
           <Panel
-            title={supervisorMode ? 'Active requests across the office' : 'Your active requests'}
+            title="Your active requests"
             subtitle="Approved or in review — auto-updated as new decisions land"
             actions={
               <button onClick={() => onNavigate?.('requests')} className="inline-flex items-center gap-1 text-[12px] font-semibold text-teal-700 dark:text-teal-300 hover:underline">
@@ -282,10 +284,11 @@ export function DashboardView({ onNavigate }: { onNavigate?: (v: string) => void
             </div>
           </Panel>
 
-          <Panel title="Office watch" subtitle={`${EMPLOYEES.length} staff across zones · ${taskCount} action${taskCount === 1 ? '' : 's'} pending`}>
+          {can('requests', 'view') && (
+          <Panel title="Office watch" subtitle={`${employees.length} staff across zones · ${taskCount} action${taskCount === 1 ? '' : 's'} pending`}>
             <div className="space-y-2.5">
               {requests
-                .filter((r) => r.status === 'under_review' || r.status === 'submitted')
+                .filter((r) => (r.status === 'under_review' || r.status === 'submitted') && canViewEmployee(r.employeeId))
                 .slice(0, 5)
                 .map((r) => (
                   <button
@@ -296,7 +299,7 @@ export function DashboardView({ onNavigate }: { onNavigate?: (v: string) => void
                     <Avatar id={r.employeeId} size="sm" />
                     <div className="min-w-0 flex-1 text-left">
                       <p className="text-[12px] font-semibold text-foreground truncate">
-                        {r.employeeId === employeeId ? 'You' : getEmployeeName(r.employeeId)} — {getLeaveType(r.leaveTypeId).short}
+                        {r.employeeId === employeeId ? 'You' : employees.find((e) => e.id === r.employeeId)?.name.split(' ')[0] ?? r.employeeId} - {typeOf(r.leaveTypeId)?.short ?? r.leaveTypeId}
                       </p>
                       <p className="text-[11px] text-muted-foreground truncate">{fmtShort(r.startDate)} → {fmtShort(r.endDate)}</p>
                     </div>
@@ -305,6 +308,7 @@ export function DashboardView({ onNavigate }: { onNavigate?: (v: string) => void
                 ))}
             </div>
           </Panel>
+          )}
         </div>
       </div>
 
@@ -321,6 +325,3 @@ export function DashboardView({ onNavigate }: { onNavigate?: (v: string) => void
   )
 }
 
-function getEmployeeName(id: string): string {
-  return EMPLOYEES.find((e) => e.id === id)?.name.split(' ')[0] ?? id
-}
