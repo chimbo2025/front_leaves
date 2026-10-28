@@ -627,6 +627,10 @@ export function RequestsView() {
             })()}
           </div>
 
+          <div className="rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2.5">
+            <p className="text-[12px] font-semibold">Next eligible leave</p>
+            <p className="text-[11px] text-muted-foreground">Based on hire date: {employee.hireDate ? employee.hireDate.slice(0,10) : '—'}</p>
+          </div>
           <TextInput type="date" label="Start date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />
 
           <div className="flex items-start gap-2.5 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5 dark:border-sky-900 dark:bg-sky-950/40">
