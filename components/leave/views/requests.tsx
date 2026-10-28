@@ -614,7 +614,6 @@ export function RequestsView() {
                 <>
                   <span className={cn('h-2 w-2 rounded-full', lt?.color ?? 'bg-zinc-400')} />
                   <span className="text-[12px] font-semibold text-foreground">{lt?.name}</span>
-                  <span className="text-[11px] text-muted-foreground">balance {bal.remaining}/{bal.accrued} days</span>
                   <span className="text-[11px] text-muted-foreground">· policy v{policy?.version ?? '–'}</span>
                 </>
               )
@@ -630,10 +629,7 @@ export function RequestsView() {
             </p>
           </div>
 
-          <p className="text-[12px] text-foreground font-mono">
-            {form.endDate ? `${days} day${days === 1 ? '' : 's'} · ` : ''}{fmtShort(form.startDate)}{form.endDate ? ` → ${fmtShort(form.endDate)}` : ' · return date set at approval'}
-            {form.isHalfDay && <span className="text-teal-700 font-semibold"> (half day)</span>}
-          </p>
+          <p className="text-[12px] text-muted-foreground">Return date set at approval.</p>
 
           <div className="flex flex-wrap gap-4">
             <label className="flex items-center gap-2 text-[12px] text-foreground">
@@ -653,44 +649,7 @@ export function RequestsView() {
             </p>
           )}
 
-          <div className="rounded-xl border border-border bg-warm dark:bg-muted/30 p-3.5 space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Repeat className="w-4 h-4 text-teal-700" />
-                <p className="text-[12px] font-semibold text-foreground">Repeat schedule</p>
-              </div>
-              <span className="text-[10px] text-muted-foreground">
-                {form.repeat === 'once' ? 'Single request' : `${form.repeatCount} occurrences`}
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <SelectInput label="Pattern" value={form.repeat} onChange={(e) => setForm({ ...form, repeat: e.target.value as PartState['repeat'] })}>
-                <option value="once">Once</option>
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-              </SelectInput>
-              <SelectInput
-                label="Occurrences"
-                value={String(form.repeatCount)}
-                onChange={(e) => setForm({ ...form, repeatCount: Number(e.target.value) })}
-                disabled={form.repeat === 'once'}
-              >
-                {[2, 3, 4, 5, 6, 8, 10, 12].map((n) => (
-                  <option key={n} value={String(n)}>{n} times</option>
-                ))}
-              </SelectInput>
-            </div>
-            {form.repeat !== 'once' && (
-              <div className="space-y-1">
-                {expandRecurrence(form).map((o, i) => (
-                  <p key={i} className="text-[11px] font-mono text-muted-foreground">
-                    #{i + 1} · {fmtShort(o.startDate)} · return date set at approval
-                  </p>
-                ))}
-                <p className="text-[10px] text-muted-foreground pt-0.5">Each occurrence is submitted as its own request with its own approval chain.</p>
-              </div>
-            )}
-          </div>
+
 
           <TextArea
             label="Reason / explanation"
