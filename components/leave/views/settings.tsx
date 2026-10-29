@@ -140,12 +140,12 @@ export function SettingsView() {
   const saveDiv = async () => {
     if (!divDraft.name.trim()) return
     if (divEditId) {
-      await leaveApi.org.updateDivision(divEditId, { name: divDraft.name.trim(), parent_department_id: divDraft.parent_department_id || null, zone_id: divDraft.zone_id || null, unit_type: divDraft.unit_type, reports_directly_to_leadership: divDraft.reports_directly_to_leadership })
+      await leaveApi.org.updateDivision(divEditId, { name: divDraft.name.trim(), code: divDraft.code.trim(), parent_department_id: divDraft.parent_department_id || null, zone_id: divDraft.zone_id || null, unit_type: divDraft.unit_type, reports_directly_to_leadership: divDraft.reports_directly_to_leadership })
       setDivEditId(null)
     } else {
-      await leaveApi.org.storeDivision({ name: divDraft.name.trim(), parent_department_id: divDraft.parent_department_id || null, zone_id: divDraft.zone_id || null, unit_type: divDraft.unit_type, reports_directly_to_leadership: divDraft.reports_directly_to_leadership })
+      await leaveApi.org.storeDivision({ name: divDraft.name.trim(), code: divDraft.code.trim(), parent_department_id: divDraft.parent_department_id || null, zone_id: divDraft.zone_id || null, unit_type: divDraft.unit_type, reports_directly_to_leadership: divDraft.reports_directly_to_leadership })
     }
-    setDivDraft({ name: '', parent_department_id: null, zone_id: '', unit_type: 'division', reports_directly_to_leadership: false })
+    setDivDraft({ name: '', code: '', parent_department_id: null, zone_id: '', unit_type: 'division', reports_directly_to_leadership: false })
     setDivOpen(false)
     try { const r = await leaveApi.org.divisions(); setDivisions(r.data); } catch {}
   }
@@ -158,7 +158,7 @@ export function SettingsView() {
     } else {
       await leaveApi.org.storeUnit({ name: unitDraft.name.trim(), parent_department_id: unitDraft.parent_department_id || null, zone_id: unitDraft.zone_id || null, unit_type: unitDraft.unit_type, reports_directly_to_leadership: unitDraft.reports_directly_to_leadership })
     }
-    setUnitDraft({ name: '', parent_department_id: null, zone_id: '', unit_type: 'unit', reports_directly_to_leadership: false })
+    setUnitDraft({ name: '', code: '', parent_department_id: null, zone_id: '', unit_type: 'unit', reports_directly_to_leadership: false })
     setUnitOpen(false)
     try { const r = await leaveApi.org.units(); setUnits(r.data); } catch {}
   }
@@ -195,11 +195,11 @@ export function SettingsView() {
   const [divisions, setDivisions] = useState<DivisionDto[]>([])
   const [units, setUnits] = useState<UnitDto[]>([])
   const [divOpen, setDivOpen] = useState(false)
-  const [divDraft, setDivDraft] = useState({ name: '', parent_department_id: '' as string | null, zone_id: '', unit_type: 'division', reports_directly_to_leadership: false })
+  const [divDraft, setDivDraft] = useState({ name: '', code: '', parent_department_id: '' as string | null, zone_id: '', unit_type: 'division', reports_directly_to_leadership: false })
   const [divEditId, setDivEditId] = useState<string | null>(null)
   const [divDelete, setDivDelete] = useState<string | null>(null)
   const [unitOpen, setUnitOpen] = useState(false)
-  const [unitDraft, setUnitDraft] = useState({ name: '', parent_department_id: '' as string | null, zone_id: '', unit_type: 'unit', reports_directly_to_leadership: false })
+  const [unitDraft, setUnitDraft] = useState({ name: '', code: '', parent_department_id: '' as string | null, zone_id: '', unit_type: 'unit', reports_directly_to_leadership: false })
   const [unitEditId, setUnitEditId] = useState<string | null>(null)
   const [unitDelete, setUnitDelete] = useState<string | null>(null)
   const [posOpen, setPosOpen] = useState(false)
@@ -752,7 +752,7 @@ export function SettingsView() {
               subtitle="Sub-departments — created based on zones and parent departments"
               actions={
                 canManage ? (
-                  <Btn onClick={() => { setDivEditId(null); setDivDraft({ name: '', parent_department_id: null, zone_id: allZones[0]?.id ?? '', unit_type: 'division', reports_directly_to_leadership: false }); setDivOpen(true) }}>
+                  <Btn onClick={() => { setDivEditId(null); setDivDraft({ name: '', code: '', parent_department_id: null, zone_id: allZones[0]?.id ?? '', unit_type: 'division', reports_directly_to_leadership: false }); setDivOpen(true) }}>
                     <Plus className="w-3.5 h-3.5" /> Add division
                   </Btn>
                 ) : undefined
@@ -769,7 +769,7 @@ export function SettingsView() {
                     </div>
                     {canManage && (
                       <>
-                        <button type="button" onClick={() => { setDivEditId(d.id); setDivDraft({ name: d.name, parent_department_id: d.parent_department_id, zone_id: d.zone_id || allZones[0]?.id || '', unit_type: d.unit_type || 'division', reports_directly_to_leadership: d.reports_directly_to_leadership }); setDivOpen(true) }} className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-border text-foreground hover:bg-card transition" aria-label={`Edit ${d.name}`}>
+                        <button type="button" onClick={() => { setDivEditId(d.id); setDivDraft({ name: d.name, code: d.code || '', parent_department_id: d.parent_department_id, zone_id: d.zone_id || allZones[0]?.id || '', unit_type: d.unit_type || 'division', reports_directly_to_leadership: d.reports_directly_to_leadership }); setDivOpen(true) }} className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-border text-foreground hover:bg-card transition" aria-label={`Edit ${d.name}`}>
                           <Pencil className="w-3 h-3" />
                         </button>
                         <button type="button" onClick={() => setDivDelete(d.id)} className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-border text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950 transition" aria-label={`Delete ${d.name}`}>
@@ -789,7 +789,7 @@ export function SettingsView() {
               subtitle="Sub-divisions — created based on zones, departments and parent divisions"
               actions={
                 canManage ? (
-                  <Btn onClick={() => { setUnitEditId(null); setUnitDraft({ name: '', parent_department_id: null, zone_id: allZones[0]?.id ?? '', unit_type: 'unit', reports_directly_to_leadership: false }); setUnitOpen(true) }}>
+                  <Btn onClick={() => { setUnitEditId(null); setUnitDraft({ name: '', code: '', parent_department_id: null, zone_id: allZones[0]?.id ?? '', unit_type: 'unit', reports_directly_to_leadership: false }); setUnitOpen(true) }}>
                     <Plus className="w-3.5 h-3.5" /> Add unit
                   </Btn>
                 ) : undefined
@@ -806,7 +806,7 @@ export function SettingsView() {
                     </div>
                     {canManage && (
                       <>
-                        <button type="button" onClick={() => { setUnitEditId(d.id); setUnitDraft({ name: d.name, parent_department_id: d.parent_department_id, zone_id: d.zone_id || allZones[0]?.id || '', unit_type: d.unit_type || 'unit', reports_directly_to_leadership: d.reports_directly_to_leadership }); setUnitOpen(true) }} className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-border text-foreground hover:bg-card transition" aria-label={`Edit ${d.name}`}>
+                        <button type="button" onClick={() => { setUnitEditId(d.id); setUnitDraft({ name: d.name, code: d.code || '', parent_department_id: d.parent_department_id, zone_id: d.zone_id || allZones[0]?.id || '', unit_type: d.unit_type || 'unit', reports_directly_to_leadership: d.reports_directly_to_leadership }); setUnitOpen(true) }} className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-border text-foreground hover:bg-card transition" aria-label={`Edit ${d.name}`}>
                           <Pencil className="w-3 h-3" />
                         </button>
                         <button type="button" onClick={() => setUnitDelete(d.id)} className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-border text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950 transition" aria-label={`Delete ${d.name}`}>
@@ -1634,9 +1634,10 @@ export function SettingsView() {
         </div>
       </Modal>
 
-      <Modal open={divOpen} onClose={() => { setDivEditId(null); setDivOpen(false) }} title={divEditId ? `Edit division — ${divDraft.name}` : 'Add division'} subtitle="Sub-department based on a parent department." size="md" footer={<Btn onClick={saveDiv} disabled={!divDraft.name.trim()}><Save className="w-3.5 h-3.5" /> {divEditId ? 'Save changes' : 'Create division'}</Btn>}>
+      <Modal open={divOpen} onClose={() => { setDivEditId(null); setDivOpen(false) }} title={divEditId ? `Edit division — ${divDraft.name}` : 'Add division'} subtitle="Sub-department based on a parent department." size="md" footer={<Btn onClick={saveDiv} disabled={!divDraft.name.trim() || !divDraft.code.trim()}><Save className="w-3.5 h-3.5" /> {divEditId ? 'Save changes' : 'Create division'}</Btn>}>
         <div className="space-y-4">
           <TextInput label="Division name" value={divDraft.name} onChange={(e) => setDivDraft({ ...divDraft, name: e.target.value })} placeholder="e.g. Appeals Division" />
+          <TextInput label="Code" value={divDraft.code} onChange={(e) => setDivDraft({ ...divDraft, code: e.target.value })} placeholder="e.g. APPEALS" />
           <SelectInput label="Parent department" value={divDraft.parent_department_id || ''} onChange={(e) => setDivDraft({ ...divDraft, parent_department_id: e.target.value || null })}>
             <option value="">— root / none —</option>
             {allDepts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -1648,9 +1649,10 @@ export function SettingsView() {
         </div>
       </Modal>
 
-      <Modal open={unitOpen} onClose={() => { setUnitEditId(null); setUnitOpen(false) }} title={unitEditId ? `Edit unit — ${unitDraft.name}` : 'Add unit'} subtitle="Sub-division based on a parent division or department." size="md" footer={<Btn onClick={saveUnit} disabled={!unitDraft.name.trim()}><Save className="w-3.5 h-3.5" /> {unitEditId ? 'Save changes' : 'Create unit'}</Btn>}>
+      <Modal open={unitOpen} onClose={() => { setUnitEditId(null); setUnitOpen(false) }} title={unitEditId ? `Edit unit — ${unitDraft.name}` : 'Add unit'} subtitle="Sub-division based on a parent division or department." size="md" footer={<Btn onClick={saveUnit} disabled={!unitDraft.name.trim() || !unitDraft.code.trim()}><Save className="w-3.5 h-3.5" /> {unitEditId ? 'Save changes' : 'Create unit'}</Btn>}>
         <div className="space-y-4">
           <TextInput label="Unit name" value={unitDraft.name} onChange={(e) => setUnitDraft({ ...unitDraft, name: e.target.value })} placeholder="e.g. Legal Research Unit" />
+          <TextInput label="Code" value={unitDraft.code} onChange={(e) => setUnitDraft({ ...unitDraft, code: e.target.value })} placeholder="e.g. LRU" />
           <SelectInput label="Parent division/department" value={unitDraft.parent_department_id || ''} onChange={(e) => setUnitDraft({ ...unitDraft, parent_department_id: e.target.value || null })}>
             <option value="">— root / none —</option>
             {allDepts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
