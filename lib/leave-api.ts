@@ -101,37 +101,65 @@ export interface DepartmentDto {
   parent_department_id: string | null
   unit_type: string | null
   reports_directly_to_leadership: boolean
+  is_active?: boolean
   head?: { employee_id: string; full_name: string } | null
 }
 
 export interface DivisionDto {
   id: string
+  code?: string
   name: string
+  name_sw?: string | null
   parent_department_id: string | null
+  parent_department?: string | null
   zone_id: string | null
-  unit_type: string | null
-  reports_directly_to_leadership: boolean
+  zone?: string | null
+  unit_type?: string | null
+  is_active?: boolean
+  sort_order?: number
+  reports_directly_to_leadership?: boolean
+  active_employees_count?: number
   head?: { employee_id: string; full_name: string } | null
 }
 
 export interface UnitDto {
   id: string
+  code?: string
   name: string
-  parent_department_id: string | null
+  name_sw?: string | null
+  parent_department_id?: string | null
+  reports_to?: string | null
   zone_id: string | null
-  unit_type: string | null
-  reports_directly_to_leadership: boolean
+  zone?: string | null
+  unit_type?: string | null
+  is_active?: boolean
+  sort_order?: number
+  reports_directly_to_leadership?: boolean
+  active_employees_count?: number
   head?: { employee_id: string; full_name: string } | null
+}
+
+export interface ApprovalRoleDto {
+  id: string
+  code: string
+  name: string
+  name_sw?: string | null
+  description?: string | null
+  resolution_type: string
+  is_active: boolean
+  is_system_protected: boolean
 }
 
 export interface PositionDto {
   id: string
+  code?: string | null
   title: string
+  title_sw?: string | null
   department_id: string | null
+  division_id: string | null
+  unit_id: string | null
   zone_id: string | null
-  tier: number
-  is_final_authority: boolean
-  default_roles?: string[]
+  is_active: boolean
 }
 
 export interface EmployeeDto {
@@ -142,6 +170,8 @@ export interface EmployeeDto {
   initials: string
   position_id: string | null
   department_id: string | null
+  division_id?: string | null
+  unit_id?: string | null
   zone_id: string | null
   gender: 'M' | 'F'
   email: string | null
@@ -431,8 +461,10 @@ export interface RegisterEmployeeInput {
   full_name: string
   initials?: string
   payroll_no?: string | null
-  position_id: string
+  position_id: string | null
   department_id: string
+  division_id?: string | null
+  unit_id?: string | null
   zone_id: string
   gender?: 'M' | 'F'
   email?: string | null
@@ -738,8 +770,10 @@ export const leaveApi = {
       full_name: string
       initials?: string
       payroll_no?: string | null
-      position_id: string
+      position_id: string | null
       department_id: string
+      division_id?: string | null
+      unit_id?: string | null
       zone_id: string
       gender?: 'M' | 'F'
       email?: string | null
@@ -753,9 +787,9 @@ export const leaveApi = {
     tree: () => request<{ data: OrgBranch[] }>('/org/tree'),
     updateEmployee: (id: string, body: Partial<Pick<EmployeeDto, 'full_name' | 'initials' | 'payroll_no' | 'position_id' | 'department_id' | 'zone_id' | 'gender' | 'email' | 'hire_date' | 'is_active'> & { role_ids?: string[] } & { password?: string }>) =>
       request<{ data: EmployeeDto }>(`/org/employees/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
-    /** Permanent staff removal — the API refuses anyone with history (422). */
-    deleteEmployee: (id: string) =>
-      request<{ message: string }>(`/org/employees/${id}`, { method: 'DELETE' }),
+    /** Force-delete a staff member; linked leave history is removed, evidence/payment records are preserved. */
+    deleteEmployee: (id: string, reason: string) =>
+      request<{ message: string; detached_documents?: number; detached_payment_cases?: number }>(`/org/employees/${id}`, { method: 'DELETE', body: JSON.stringify({ reason }) }),
     /** Toggle a single unscoped role grant. Preferred over a full role_ids
      *  replacement, which would materialise unscoped duplicates of scoped
      *  department/zonal grants. */
@@ -763,11 +797,11 @@ export const leaveApi = {
       request<{ data: EmployeeDto & { unscoped_role_ids: string[] } }>(`/org/employees/${employeeId}/roles/${roleId}`, { method: 'POST' }),
     revokeRole: (employeeId: string, roleId: string) =>
       request<{ data: EmployeeDto & { unscoped_role_ids: string[] } }>(`/org/employees/${employeeId}/roles/${roleId}`, { method: 'DELETE' }),
-    storePosition: (body: { title: string; department_id: string; zone_id?: string | null; tier?: number; is_final_authority?: boolean; default_role_ids?: string[] }) =>
+    storePosition: (body: { title: string; department_id: string; division_id?: string | null; unit_id?: string | null; zone_id?: string | null }) =>
       request<{ data: PositionDto }>('/org/positions', { method: 'POST', body: JSON.stringify(body) }),
-    updatePosition: (id: string, body: Partial<{ title: string; department_id: string; zone_id?: string | null; tier?: number; is_final_authority?: boolean; default_role_ids?: string[] }>) =>
+    updatePosition: (id: string, body: Partial<{ title: string; department_id: string; division_id?: string | null; unit_id?: string | null; zone_id?: string | null }>) =>
       request<{ data: PositionDto }>(`/org/positions/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
-    deletePosition: (id: string) => request<{ message: string }>(`/org/positions/${id}`, { method: 'DELETE' }),
+    deletePosition: (id: string) => request<{ message: string; detached_employees?: number }>(`/org/positions/${id}`, { method: 'DELETE' }),
     storeZone: (body: { name: string; short?: string | null; is_hq?: boolean; is_pemba?: boolean; is_coordination?: boolean }) =>
       request<{ data: ZoneDto }>('/org/zones', { method: 'POST', body: JSON.stringify(body) }),
     updateZone: (id: string, body: Partial<{ name: string; short?: string | null; is_hq?: boolean; is_pemba?: boolean; is_coordination?: boolean }>) =>
@@ -782,16 +816,52 @@ export const leaveApi = {
       request<{ data: DepartmentDto }>(`/org/departments/${departmentId}/head`, { method: 'PUT', body: JSON.stringify({ employee_id: employeeId }) }),
     clearDepartmentHead: (departmentId: string) =>
       request<{ data: DepartmentDto }>(`/org/departments/${departmentId}/head`, { method: 'DELETE' }),
-    divisions: () => request<{ data: DivisionDto[] }>('/org/divisions'),
-    storeDivision: (body: { name: string; parent_department_id?: string | null; zone_id?: string | null; unit_type?: string; reports_directly_to_leadership?: boolean }) =>
+    divisions: (params?: { parent_department_id?: string; zone_id?: string; is_active?: boolean }) => {
+      const q = new URLSearchParams()
+      if (params?.parent_department_id) q.set('parent_department_id', params.parent_department_id)
+      if (params?.zone_id) q.set('zone_id', params.zone_id)
+      if (params?.is_active !== undefined) q.set('is_active', String(params.is_active))
+      const qs = q.toString()
+      return request<{ data: DivisionDto[]; pagination?: any }>(`/org/divisions${qs ? '?' + qs : ''}`)
+    },
+    getDivision: (id: string) => request<{ data: DivisionDto; employees?: any[] }>(`/org/divisions/${id}`),
+    getDivisionEmployees: (id: string, params?: { active?: boolean; page?: number; per_page?: number }) => {
+      const q = new URLSearchParams()
+      if (params?.active !== undefined) q.set('active', String(params.active))
+      if (params?.page) q.set('page', String(params.page))
+      if (params?.per_page) q.set('per_page', String(params.per_page))
+      const qs = q.toString()
+      return request<{ data: any[]; pagination?: any }>(`/org/divisions/${id}/employees${qs ? '?' + qs : ''}`)
+    },
+    assignDivisionHead: (divisionId: string, employeeId: string) =>
+      request<{ data: any }>(`/org/divisions/${divisionId}/head`, { method: 'POST', body: JSON.stringify({ employee_id: employeeId }) }),
+    units: (params?: { zone_id?: string; is_active?: boolean }) => {
+      const q = new URLSearchParams()
+      if (params?.zone_id) q.set('zone_id', params.zone_id)
+      if (params?.is_active !== undefined) q.set('is_active', String(params.is_active))
+      const qs = q.toString()
+      return request<{ data: UnitDto[]; pagination?: any }>(`/org/units${qs ? '?' + qs : ''}`)
+    },
+    getUnit: (id: string) => request<{ data: UnitDto; employees?: any[] }>(`/org/units/${id}`),
+    getUnitEmployees: (id: string, params?: { active?: boolean; page?: number; per_page?: number }) => {
+      const q = new URLSearchParams()
+      if (params?.active !== undefined) q.set('active', String(params.active))
+      if (params?.page) q.set('page', String(params.page))
+      if (params?.per_page) q.set('per_page', String(params.per_page))
+      const qs = q.toString()
+      return request<{ data: any[]; pagination?: any }>(`/org/units/${id}/employees${qs ? '?' + qs : ''}`)
+    },
+    assignUnitHead: (unitId: string, employeeId: string) =>
+      request<{ data: any }>(`/org/units/${unitId}/head`, { method: 'POST', body: JSON.stringify({ employee_id: employeeId }) }),
+    approvalRoles: () => request<{ data: ApprovalRoleDto[] }>('/org/approval-roles'),
+    storeDivision: (body: { name: string; code?: string; parent_department_id?: string | null; unit_type?: string; reports_directly_to_leadership?: boolean }) =>
       request<{ data: DivisionDto }>('/org/divisions', { method: 'POST', body: JSON.stringify(body) }),
-    updateDivision: (id: string, body: Partial<{ name: string; parent_department_id?: string | null; zone_id?: string | null; unit_type?: string; reports_directly_to_leadership?: boolean }>) =>
+    updateDivision: (id: string, body: Partial<{ name: string; code: string; parent_department_id?: string | null; unit_type?: string; reports_directly_to_leadership?: boolean }>) =>
       request<{ data: DivisionDto }>(`/org/divisions/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     deleteDivision: (id: string) => request<{ message: string }>(`/org/divisions/${id}`, { method: 'DELETE' }),
-    units: () => request<{ data: UnitDto[] }>('/org/units'),
-    storeUnit: (body: { name: string; parent_department_id?: string | null; zone_id?: string | null; unit_type?: string; reports_directly_to_leadership?: boolean }) =>
+    storeUnit: (body: { name: string; code?: string; reports_directly_to_leadership?: boolean }) =>
       request<{ data: UnitDto }>('/org/units', { method: 'POST', body: JSON.stringify(body) }),
-    updateUnit: (id: string, body: Partial<{ name: string; parent_department_id?: string | null; zone_id?: string | null; unit_type?: string; reports_directly_to_leadership?: boolean }>) =>
+    updateUnit: (id: string, body: Partial<{ name: string; code: string; reports_directly_to_leadership?: boolean }>) =>
       request<{ data: UnitDto }>(`/org/units/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     deleteUnit: (id: string) => request<{ message: string }>(`/org/units/${id}`, { method: 'DELETE' }),
     setZoneHead: (zoneId: string, employeeId: string) =>
@@ -838,6 +908,9 @@ export const leaveApi = {
     /** Hard delete — drafts only; the API keeps submitted history forever. */
     destroy: (id: number | string) =>
       request<{ message: string; id: number | string }>(`/requests/${id}`, { method: 'DELETE' }),
+    /** Force-delete a request of any status; audit/evidence and payment history are retained. */
+    forceDelete: (id: number | string, reason: string) =>
+      request<{ message: string; id: number | string; detached_documents?: number; preserved_payment_cases?: number }>(`/requests/${id}/force`, { method: 'DELETE', body: JSON.stringify({ reason }) }),
     workflow: (id: number | string) => request<{ data: ChainItem[] }>(`/requests/${id}/workflow`),
     inbox: () => request<{ data: InboxItem[] }>('/requests/inbox'),
     preview: (body: { employee_id: string; leave_type_id: string; days?: number | null }) =>
@@ -967,3 +1040,11 @@ export const leaveApi = {
       request<ReportPage<PaymentCaseRow>>(`/reports/payment/employees/${employeeId}/history${qs(params ?? {})}`),
   },
 }
+// Permission audit (read-only, admin.view)
+export const getPermissionAudit = () => fetch('/api/roles/permissions/audit').then(r => r.json())
+
+// Force delete leave request (reason required)
+export const forceDeleteLeaveRequest = (id: string, reason: string) => leaveApi.requests.forceDelete(id, reason)
+
+// Force delete employee (reason required, employees.force_delete)
+export const forceDeleteEmployee = (id: string, reason: string) => leaveApi.org.deleteEmployee(id, reason)

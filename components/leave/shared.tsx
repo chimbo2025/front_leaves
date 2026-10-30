@@ -557,6 +557,7 @@ export function ConfirmModal({
   message,
   confirmLabel = 'Confirm',
   tone = 'danger',
+  confirmDisabled = false,
   onConfirm,
 }: {
   open: boolean
@@ -565,6 +566,7 @@ export function ConfirmModal({
   message: React.ReactNode
   confirmLabel?: string
   tone?: 'danger' | 'primary'
+  confirmDisabled?: boolean
   onConfirm: () => void
 }) {
   return (
@@ -580,12 +582,13 @@ export function ConfirmModal({
         </button>
         <button
           type="button"
+          disabled={confirmDisabled}
           onClick={() => {
             onConfirm()
             onClose()
           }}
           className={cn(
-            'h-10 px-4 rounded-xl text-sm font-semibold text-white shadow-sm',
+            'h-10 px-4 rounded-xl text-sm font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50',
             tone === 'danger' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-teal-700 hover:bg-teal-800',
           )}
         >

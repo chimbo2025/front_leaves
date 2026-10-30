@@ -103,8 +103,10 @@ export interface RegisterEmployeeInput {
   full_name: string
   initials?: string
   payrollNo?: string | null
-  position_id: string
+  position_id: string | null
   department_id: string
+  division_id?: string | null
+  unit_id?: string | null
   zone_id: string
   gender?: 'M' | 'F'
   email?: string | null
@@ -137,6 +139,7 @@ export interface CustomDeptConfig {
   zoneId: string
   parentId?: string
   unitType?: string
+  isActive?: boolean
 }
 
 export interface CustomRoleConfig {
@@ -213,8 +216,8 @@ interface LeaveContextValue {
   employees: EmployeeRow[]
   positions: PositionDto[]
   positionTitle: (id: string) => string
-  createPosition: (input: { title: string; departmentId: string; zoneId?: string; tier?: number; isFinalAuthority?: boolean; defaultRoleIds?: string[] }) => Promise<boolean>
-  updatePosition: (id: string, patch: { title?: string; departmentId?: string; zoneId?: string | null; tier?: number; isFinalAuthority?: boolean; defaultRoleIds?: string[] }) => Promise<boolean>
+  createPosition: (input: { title: string; departmentId: string; divisionId?: string | null; unitId?: string | null }) => Promise<boolean>
+  updatePosition: (id: string, patch: { title?: string; departmentId?: string; divisionId?: string | null; unitId?: string | null }) => Promise<boolean>
   deletePosition: (id: string) => Promise<boolean>
   supervisorMode: boolean
   access: AuthAccess | null
@@ -281,7 +284,8 @@ interface LeaveContextValue {
   ) => void
   toggleEmployeeActive: (employeeId: string) => void
   /** Permanent staff removal — API refuses anyone with history (422 toast). */
-  deleteEmployee: (employeeId: string) => Promise<boolean>
+  deleteEmployee: (employeeId: string, reason: string) => Promise<boolean>
+  forceDeleteRequest: (requestId: string, reason: string) => Promise<boolean>
   registerEmployee: (input: RegisterEmployeeInput) => Promise<Employee | null>
   createLeaveType: (input: CreateLeaveTypeInput) => void
   updateLeaveType: (leaveTypeId: string, patch: Partial<Pick<LeaveType, 'name' | 'swahili' | 'short' | 'description' | 'color' | 'paid'>>) => void
@@ -463,10 +467,12 @@ function employeeRow(j: EmployeeDto): EmployeeRow {
     roleIds: [...new Set(j.role_ids ?? [])],
     payrollNo: j.payroll_no ?? '',
     name: j.full_name,
-    title: j.position?.title ?? j.position_id ?? '',
+    title: j.position?.title ?? (j.position_id ? j.position_id : 'No position assigned'),
     initials: j.initials,
     positionId: j.position_id ?? '',
     departmentId: j.department_id ?? '',
+    divisionId: j.division_id ?? undefined,
+    unitId: j.unit_id ?? undefined,
     zoneId: j.zone_id ?? '',
     gender: j.gender,
     hireDate: j.hire_date ?? '',
@@ -662,28 +668,6 @@ function slaMap(defs: WorkflowDef[]): Record<string, number> {
     for (const s of d.steps) out[s.role] = s.slaDays
   }
   return out
-}
-
-/** Cached/stale payloads may still carry pivot objects ({ position_id, role_id }) instead of role-id strings. */
-function coerceRoleIds(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  const out: string[] = []
-  for (const entry of value) {
-    if (typeof entry === 'string') out.push(entry)
-    else if (typeof entry === 'object' && entry !== null) {
-      const rid = (entry as Record<string, unknown>).role_id
-      if (typeof rid === 'string') out.push(rid)
-      else if (typeof rid === 'number') out.push(String(rid))
-    }
-  }
-  return out
-}
-
-function normalizePosition(p: PositionDto): PositionDto {
-  // Structural heads (DEPT_HEAD/ZONAL_HEAD) are per-unit grants the server
-  // refuses as unscoped mints, so they can never legitimately appear in a
-  // position's defaults — strip legacy rows rather than offer them.
-  return { ...p, default_roles: coerceRoleIds(p.default_roles).filter((r) => r !== 'DEPT_HEAD' && r !== 'ZONAL_HEAD') }
 }
 
 // ---------------------------------------------------------------------------
@@ -917,6 +901,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         zoneId: d.zone_id ?? '',
         parentId: d.parent_department_id ?? undefined,
         unitType: d.unit_type ?? undefined,
+        isActive: d.is_active ?? true,
       }))
       hydrateOrg({ departments: rows })
       setOrgDepts(rows)
@@ -946,7 +931,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
     // every signed-in user.
     const res = await safe(leaveApi.org.positions())
     if (res) {
-      const rows = res.data.map(normalizePosition)
+      const rows = res.data
       hydrateOrg({ positions: rows as unknown as import('@/lib/leave').Position[] })
       setPositions(rows)
     }
@@ -1286,7 +1271,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
     return {
       id: employeeId,
       name: a?.full_name ?? user?.username ?? '—',
-      title: a?.position_id ?? '',
+      title: a?.position_id ?? 'No position assigned',
       initials: a?.initials ?? '—',
       positionId: a?.position_id ?? '',
       departmentId: a?.department_id ?? '',
@@ -1778,15 +1763,30 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
 
   /** Permanent removal; `safe` surfaces the API's 422 reason (history, head…). */
   const deleteEmployee = React.useCallback(
-    async (id: string): Promise<boolean> => {
+    async (id: string, reason: string): Promise<boolean> => {
       const target = employees.find((e) => e.id === id)
-      const res = await safe(leaveApi.org.deleteEmployee(id))
+      const res = await safe(leaveApi.org.deleteEmployee(id, reason))
       if (!res) return false
       setEmployees((prev) => prev.filter((e) => e.id !== id))
-      toast.success(`${target?.name ?? 'Staff member'} deleted.`)
+      setRequests((prev) => prev.filter((r) => r.employeeId !== id))
+      refreshAfterWrite()
+      toast.success(`${target?.name ?? 'Staff member'} permanently deleted. Evidence and payment records were preserved.`)
       return true
     },
-    [employees],
+    [employees, refreshAfterWrite],
+  )
+
+  const forceDeleteRequest = React.useCallback(
+    async (requestId: string, reason: string): Promise<boolean> => {
+      const target = requests.find((r) => r.id === requestId)
+      const res = await safe(leaveApi.requests.forceDelete(requestId, reason))
+      if (!res) return false
+      setRequests((prev) => prev.filter((r) => r.id !== requestId))
+      refreshWithHandovers()
+      toast.success(`${target?.ref ?? 'Leave request'} permanently deleted. Evidence and payment records were preserved.`)
+      return true
+    },
+    [requests, refreshWithHandovers],
   )
 
   const SOFT_BY_COLOR: Record<string, string> = {
@@ -2041,6 +2041,8 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
           payroll_no: input.payrollNo ?? null,
           position_id: input.position_id,
           department_id: input.department_id,
+          division_id: input.division_id ?? null,
+          unit_id: input.unit_id ?? null,
           zone_id: input.zone_id,
           gender: input.gender,
           email: input.email ?? null,
@@ -2395,15 +2397,13 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   )
 
   const createPosition = React.useCallback(
-    async (input: { title: string; departmentId: string; zoneId?: string; tier?: number; isFinalAuthority?: boolean; defaultRoleIds?: string[] }) => {
+    async (input: { title: string; departmentId: string; divisionId?: string | null; unitId?: string | null }) => {
       const res = await safe(
         leaveApi.org.storePosition({
           title: input.title.trim(),
           department_id: input.departmentId,
-          zone_id: input.zoneId ?? null,
-          tier: input.tier ?? 1,
-          is_final_authority: input.isFinalAuthority ?? false,
-          default_role_ids: input.defaultRoleIds,
+          division_id: input.divisionId ?? null,
+          unit_id: input.unitId ?? null,
         }),
       )
       if (res) {
@@ -2418,15 +2418,13 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   )
 
   const updatePosition = React.useCallback(
-    async (id: string, patch: { title?: string; departmentId?: string; zoneId?: string | null; tier?: number; isFinalAuthority?: boolean; defaultRoleIds?: string[] }) => {
+    async (id: string, patch: { title?: string; departmentId?: string; divisionId?: string | null; unitId?: string | null }) => {
       const res = await safe(
         leaveApi.org.updatePosition(id, {
           title: patch.title?.trim(),
           department_id: patch.departmentId,
-          zone_id: patch.zoneId,
-          tier: patch.tier,
-          is_final_authority: patch.isFinalAuthority,
-          default_role_ids: patch.defaultRoleIds,
+          division_id: patch.divisionId,
+          unit_id: patch.unitId,
         }),
       )
       if (res) {
@@ -2444,11 +2442,12 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
     const res = await safe(leaveApi.org.deletePosition(id))
     if (res) {
       setPositions((prev) => prev.filter((p) => p.id !== id))
-      toast.success('Position deleted.')
+      await safe(loadEmployees())
+      toast.success(`Position deleted. ${res.detached_employees ?? 0} employee(s) now have no position assigned.`)
       return true
     }
     return false
-  }, [])
+  }, [loadEmployees])
 
   if (mounted && loading && status === 'authenticated') {
     return (
@@ -2508,6 +2507,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         withdrawRequest,
         submitDraft,
         deleteDraft,
+        forceDeleteRequest,
         createDelegation,
         revokeDelegation,
         setDelegationActive,

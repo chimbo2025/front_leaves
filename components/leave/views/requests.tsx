@@ -22,6 +22,7 @@ import {
   ChevronRight,
   Repeat,
   Siren,
+  Trash2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -125,6 +126,7 @@ export function RequestsView() {
     withdrawRequest,
     submitDraft,
     deleteDraft,
+    forceDeleteRequest,
     can,
     eligibility,
     orgEligibility,
@@ -171,6 +173,8 @@ export function RequestsView() {
   const [editForm, setEditForm] = useState<PartState>(form)
   const [deleteTarget, setDeleteTarget] = useState<LeaveRequest | null>(null)
   const [deleteReason, setDeleteReason] = useState('')
+  const [forceDeleteTarget, setForceDeleteTarget] = useState<LeaveRequest | null>(null)
+  const [forceDeleteReason, setForceDeleteReason] = useState('')
   const [approveTarget, setApproveTarget] = useState<{ request: LeaveRequest; stepOrder: number } | null>(null)
   const [approveReturnDate, setApproveReturnDate] = useState(TODAY)
   // Same signature ceremony as the Approvals queue: the API refuses
@@ -335,6 +339,15 @@ export function RequestsView() {
     setDeleteReason('')
   }
 
+  const confirmForceDelete = async () => {
+    if (!forceDeleteTarget || forceDeleteReason.trim().length < 3) return
+    const target = forceDeleteTarget
+    const deleted = await forceDeleteRequest(target.id, forceDeleteReason.trim())
+    if (deleted && detail?.id === target.id) setDetail(null)
+    setForceDeleteTarget(null)
+    setForceDeleteReason('')
+  }
+
   const deletingDraft = deleteTarget?.status === 'draft'
 
   const buildMenu = (r: LeaveRequest): RowMenuItem[] => {
@@ -357,6 +370,14 @@ export function RequestsView() {
       items.push({ icon: ArchiveX, label: 'Withdraw request', tone: 'danger', onClick: () => setDeleteTarget(r) })
     } else {
       items.push({ icon: ArchiveX, label: 'Delete (history locked)', disabled: true, title: 'Completed requests are kept in the tamper-proof audit trail.' })
+    }
+    if (can('leave_requests', 'force_delete')) {
+      items.push({
+        icon: Trash2,
+        label: 'Force-delete permanently',
+        tone: 'danger',
+        onClick: () => { setForceDeleteReason(''); setForceDeleteTarget(r) },
+      })
     }
     if (r.status === 'returned_for_correction' && (canViewEmployee(r.employeeId) || r.employeeId === employeeId)) {
       items.push({ icon: RotateCcw, label: 'Resubmit', onClick: () => resubmit(r.id) })
@@ -862,6 +883,29 @@ export function RequestsView() {
           </div>
         }
         onConfirm={confirmDelete}
+      />
+
+      <ConfirmModal
+        open={forceDeleteTarget !== null}
+        onClose={() => { setForceDeleteTarget(null); setForceDeleteReason('') }}
+        title="Force-delete this leave request?"
+        confirmLabel="Delete permanently"
+        confirmDisabled={forceDeleteReason.trim().length < 3}
+        message={
+          <div className="space-y-3">
+            <p>
+              Permanently delete <span className="font-semibold text-foreground">{forceDeleteTarget?.ref}</span> regardless of status or approval history. Documents, payment records and the audit entry are retained. This cannot be undone.
+            </p>
+            <TextInput
+              label="Reason (required; recorded in audit)"
+              value={forceDeleteReason}
+              onChange={(e) => setForceDeleteReason(e.target.value)}
+              placeholder="At least 3 characters"
+              maxLength={500}
+            />
+          </div>
+        }
+        onConfirm={() => { void confirmForceDelete() }}
       />
 
       <Modal

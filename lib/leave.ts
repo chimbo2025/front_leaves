@@ -34,14 +34,15 @@ export interface Department {
   parentId?: string
   /** department | division | unit | independent_unit | region | … */
   unitType?: string
+  isActive?: boolean
 }
 
 export interface Position {
   id: string
   title: string
   departmentId: string
-  tier: number
-  isFinalAuthority?: boolean
+  divisionId?: string
+  unitId?: string
 }
 
 export interface Employee {
@@ -51,6 +52,8 @@ export interface Employee {
   initials: string
   positionId: string
   departmentId: string
+  divisionId?: string
+  unitId?: string
   zoneId: string
   gender: 'M' | 'F'
   hireDate: string
