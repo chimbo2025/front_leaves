@@ -38,18 +38,24 @@ interface StepDraft {
   approval_role_id: string
   role_required?: string
   fallback_approval_role_id?: string | null
+  assignment_mode?: 'shared_queue' | 'assigned_approver'
+  scope_type?: 'requester_department' | 'requester_division' | 'requester_unit' | 'requester_zone' | 'office_wide'
   sla_days: number
   is_mandatory: boolean
   allow_same_person_as_previous_steps: boolean
   note: string
 }
 
-function scopeLabel(def: WorkflowDef, depts: { id: string; name: string }[]): string {
+function scopeLabel(def: WorkflowDef, depts: { id: string; name: string }[], zones: { id: string; short?: string }[]): string {
+  const parts: string[] = []
   if (def.departmentId) {
-    const d = depts.find((dept) => dept.id === def.departmentId)
-    return `Department: ${d?.name ?? def.departmentId}`
+    const unit = depts.find((department) => department.id === def.departmentId)
+    parts.push(`Unit / section: ${unit?.name ?? def.departmentId}`)
   }
-  return 'All Departments (Default Office Workflow)'
+  if (def.zoneId) {
+    parts.push(`Zone: ${zones.find((zone) => zone.id === def.zoneId)?.short ?? def.zoneId}`)
+  }
+  return parts.length ? parts.join(' · ') : 'Office-wide default'
 }
 
 export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void }) {
@@ -63,6 +69,7 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
     setWorkflowActive,
     deleteWorkflow,
     allDepts,
+    allZones,
   } = useLeave()
 
   const canEditWorkflows = can('approval_workflows', 'update') && can('policies', 'edit_policy')
@@ -96,16 +103,19 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
     defId: string
     leaveTypeId: string
     departmentId?: string | null
+    zoneId?: string | null
   } | {
     mode: 'create'
     leaveTypeId: string
     departmentId?: string | null
+    zoneId?: string | null
   } | null>(null)
 
   const [draftSteps, setDraftSteps] = useState<StepDraft[]>([])
   const [createTypeId, setCreateTypeId] = useState('')
   const [createMinDays, setCreateMinDays] = useState(0)
   const [createDepartmentId, setCreateDepartmentId] = useState('')
+  const [createZoneId, setCreateZoneId] = useState('')
   const [deleteDef, setDeleteDef] = useState<WorkflowDef | null>(null)
 
   const openEdit = (def: WorkflowDef) => {
@@ -114,6 +124,8 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
         approval_role_id: s.approval_role_id || s.approvalRoleId || s.role?.toLowerCase() || 'supervisor',
         role_required: s.role,
         fallback_approval_role_id: s.fallback_approval_role_id || null,
+        assignment_mode: s.assignment_mode || s.assignmentMode || 'assigned_approver',
+        scope_type: s.scope_type || s.scopeType || 'requester_department',
         sla_days: s.slaDays || s.sla_days || 2,
         is_mandatory: s.is_mandatory !== false,
         allow_same_person_as_previous_steps: s.allow_same_person_as_previous_steps === true,
@@ -125,6 +137,7 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
       defId: def.id,
       leaveTypeId: def.leaveTypeId,
       departmentId: def.departmentId,
+      zoneId: def.zoneId,
     })
   }
 
@@ -137,6 +150,8 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
     setDraftSteps([
       {
         approval_role_id: 'supervisor',
+        assignment_mode: 'assigned_approver',
+        scope_type: 'requester_department',
         sla_days: 2,
         is_mandatory: true,
         allow_same_person_as_previous_steps: false,
@@ -146,7 +161,8 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
     setCreateTypeId(typeId)
     setCreateMinDays(0)
     setCreateDepartmentId('')
-    setBuilder({ mode: 'create', leaveTypeId: typeId })
+    setCreateZoneId('')
+    setBuilder({ mode: 'create', leaveTypeId: typeId, departmentId: null, zoneId: null })
   }
 
   const saveBuilder = async () => {
@@ -154,6 +170,8 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
     const cleanSteps = draftSteps.map((s, i) => ({
       approval_role_id: s.approval_role_id,
       fallback_approval_role_id: s.fallback_approval_role_id || null,
+      assignment_mode: s.assignment_mode || 'assigned_approver',
+      scope_type: s.scope_type || 'requester_department',
       sla_days: s.sla_days,
       is_mandatory: s.is_mandatory,
       allow_same_person_as_previous_steps: s.allow_same_person_as_previous_steps,
@@ -165,6 +183,7 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
       try {
         await leaveApi.workflows.update(builder.defId, {
           department_id: builder.departmentId || null,
+          zone_id: builder.zoneId || null,
           steps: cleanSteps as any,
         })
         window.location.reload()
@@ -177,6 +196,7 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
           leave_type_id: createTypeId,
           min_duration_days: createMinDays,
           department_id: createDepartmentId || null,
+          zone_id: createZoneId || null,
           steps: cleanSteps as any,
         })
         window.location.reload()
@@ -185,6 +205,17 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
       }
     }
     setBuilder(null)
+  }
+
+  const selectedZoneId = builder?.mode === 'create' ? createZoneId : builder?.zoneId ?? ''
+  const selectedDepartmentId = builder?.mode === 'create' ? createDepartmentId : builder?.departmentId ?? ''
+  const updateScopeZone = (zoneId: string) => {
+    if (builder?.mode === 'create') setCreateZoneId(zoneId)
+    else if (builder) setBuilder({ ...builder, zoneId: zoneId || null })
+  }
+  const updateScopeDepartment = (departmentId: string) => {
+    if (builder?.mode === 'create') setCreateDepartmentId(departmentId)
+    else if (builder) setBuilder({ ...builder, departmentId: departmentId || null })
   }
 
   const sorted = [...workflowDefs].sort((a, b) =>
@@ -229,6 +260,39 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
                   {r.name} ({r.code})
                 </option>
               ))}
+            </SelectInput>
+
+            <SelectInput
+              label="Assignment Mode"
+              value={s.assignment_mode || 'assigned_approver'}
+              onChange={(e) =>
+                setDraftSteps((prev) =>
+                  prev.map((x, idx) =>
+                    idx === i ? { ...x, assignment_mode: e.target.value as any } : x,
+                  ),
+                )
+              }
+            >
+              <option value="assigned_approver">Assigned Approver</option>
+              <option value="shared_queue">Shared Queue</option>
+            </SelectInput>
+
+            <SelectInput
+              label="Scope"
+              value={s.scope_type || 'requester_department'}
+              onChange={(e) =>
+                setDraftSteps((prev) =>
+                  prev.map((x, idx) =>
+                    idx === i ? { ...x, scope_type: e.target.value as any } : x,
+                  ),
+                )
+              }
+            >
+              <option value="requester_department">Requester Department</option>
+              <option value="requester_division">Requester Division</option>
+              <option value="requester_unit">Requester Unit</option>
+              <option value="requester_zone">Requester Zone</option>
+              <option value="office_wide">Office-wide</option>
             </SelectInput>
 
             <SelectInput
@@ -349,7 +413,7 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
     <div className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-8 py-6 space-y-6">
       <SectionHeading
         title="Approval workflows"
-        subtitle="Workflows depend strictly on departments. Each leave type routes through an approval-role pipeline."
+        subtitle="The most specific matching scope wins: unit, division, department, zone, then office default. Each leave type routes through approval roles."
         actions={
           <div className="flex items-center gap-2">
             {canEditWorkflows && (
@@ -378,7 +442,7 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
 
       <Panel
         title="Workflow definitions"
-        subtitle="Definitions are scoped by Department only. Subordinate divisions/units do not alter workflow resolution."
+        subtitle="A leave type may have a default workflow and more-specific zone, department, division, or independent-unit workflows."
       >
         <div className="space-y-3">
           {sorted.map((def) => {
@@ -407,7 +471,7 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
                       </span>
                     </p>
                     <p className="text-[11px] text-muted-foreground">
-                      {scopeLabel(def, allDepts)} • {def.steps.length} step{def.steps.length === 1 ? '' : 's'}
+                      {scopeLabel(def, allDepts, allZones)} • {def.steps.length} step{def.steps.length === 1 ? '' : 's'}
                       {def.minDurationDays ? ` • applies from ${def.minDurationDays}+ days` : ''}
                     </p>
                   </div>
@@ -470,12 +534,12 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
         onClose={() => setBuilder(null)}
         title={
           builder?.mode === 'create'
-            ? `New Department Workflow — ${typeOf(createTypeId)?.name ?? 'Select leave type'}`
+            ? `New Workflow — ${typeOf(createTypeId)?.name ?? 'Select leave type'}`
             : builder
               ? `Edit Workflow — ${typeOf(builder.leaveTypeId)?.name ?? builder.leaveTypeId}`
               : 'Workflow Builder'
         }
-        subtitle="Workflows are scoped by Department only. Steps use dynamic approval roles."
+        subtitle="Optional zone and placement scopes narrow where this approval-role chain applies."
         size="lg"
         footer={
           <Btn onClick={saveBuilder} disabled={draftSteps.length === 0 || (builder?.mode === 'create' && !createTypeId)}>
@@ -484,8 +548,9 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
         }
       >
         <div className="space-y-4">
-          {builder?.mode === 'create' && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {builder?.mode === 'create' && (
+              <>
               <SelectInput label="Leave Type" value={createTypeId} onChange={(e) => setCreateTypeId(e.target.value)}>
                 {leaveTypes.map((lt) => (
                   <option key={lt.id} value={lt.id}>
@@ -500,20 +565,21 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
                 value={createMinDays}
                 onChange={(e) => setCreateMinDays(Number(e.target.value))}
               />
-              <SelectInput
-                label="Department Scope"
-                value={createDepartmentId}
-                onChange={(e) => setCreateDepartmentId(e.target.value)}
-              >
-                <option value="">All Departments (Default)</option>
-                {allDepts.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </SelectInput>
-            </div>
-          )}
+              </>
+            )}
+            <SelectInput label="Zone scope (optional)" value={selectedZoneId} onChange={(e) => updateScopeZone(e.target.value)}>
+              <option value="">All zones</option>
+              {allZones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name}</option>)}
+            </SelectInput>
+            <SelectInput label="Department / division / unit scope (optional)" value={selectedDepartmentId} onChange={(e) => updateScopeDepartment(e.target.value)}>
+              <option value="">No placement scope</option>
+              {allDepts.filter((d) => d.isActive !== false).map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}{d.unitType ? ` · ${d.unitType.replace('_', ' ')}` : ''}
+                </option>
+              ))}
+            </SelectInput>
+          </div>
           {stepsEditor}
         </div>
       </Modal>

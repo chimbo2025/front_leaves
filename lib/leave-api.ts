@@ -316,7 +316,7 @@ export interface RequestAssignment {
   role: string
   assignee_id: string | null
   assignee_name: string | null
-  status: 'pending' | 'done' | 'skipped'
+  status: 'pending' | 'queued' | 'done' | 'skipped'
   due_at: string | null
   decided_at: string | null
 }
@@ -379,7 +379,7 @@ export interface WorkflowAssignmentRaw {
   step_id: number
   assigned_employee_id: string | null
   assigned_role_id: string
-  status: 'pending' | 'done' | 'skipped'
+  status: 'pending' | 'queued' | 'done' | 'skipped'
   due_at: string | null
   decided_at: string | null
   assignee?: EmployeeDto | null
@@ -395,6 +395,12 @@ export interface ChainItem {
   sla_days: number
   due_at: string
   note: string | null
+}
+
+export interface ApprovalInsight {
+  annual_balance: { accrued: number; used: number; remaining: number; carryOver: number } | null
+  annual_request_number: number | null
+  payment_eligible: boolean
 }
 
 export interface DecideResponse {
@@ -621,6 +627,19 @@ export interface ReportPageLinks { first: string | null; last: string | null; pr
 
 export interface ReportPage<T> { data: T[]; meta: ReportPageMeta; links: ReportPageLinks }
 
+export interface ReportExportDto {
+  id: number
+  report_type: string
+  format: 'csv' | 'pdf'
+  status: 'queued' | 'processing' | 'completed' | 'failed' | 'expired' | 'cancelled'
+  row_count: number | null
+  column_count: number | null
+  generated_at: string | null
+  expires_at: string | null
+  failure_reason: string | null
+  is_downloadable: boolean
+}
+
 export interface DetailRequestRow {
   id: number; ref: string
   employee: { id: string; full_name: string } | null
@@ -669,6 +688,23 @@ export interface PaymentCaseRow {
   leave_type?: { id: string; code?: string; name?: string } | null
   leave_request?: { id: number; ref?: string; status?: string; start_date?: string | null; end_date?: string | null; days?: number | null } | null
   [key: string]: unknown
+}
+
+export interface LeavePaymentCaseDto {
+  id: number
+  employee_id: string | null
+  leave_request_id: number | null
+  leave_type_id: string | null
+  payment_type: string
+  status: string
+  eligible_amount: number | null
+  calculated_amount: number | null
+  currency: string | null
+  salary_basis?: string | null
+  salary_amount?: number | null
+  employee?: { id: string; full_name: string; department_id?: string | null; zone_id?: string | null } | null
+  leave_type?: { id: string; code?: string; name?: string } | null
+  leave_request?: { id: number; ref?: string; status?: string; start_date?: string | null; end_date?: string | null; days?: number | null } | null
 }
 
 export interface PaymentPairRow {
@@ -912,6 +948,7 @@ export const leaveApi = {
     forceDelete: (id: number | string, reason: string) =>
       request<{ message: string; id: number | string; detached_documents?: number; preserved_payment_cases?: number }>(`/requests/${id}/force`, { method: 'DELETE', body: JSON.stringify({ reason }) }),
     workflow: (id: number | string) => request<{ data: ChainItem[] }>(`/requests/${id}/workflow`),
+    approvalInsight: (id: number | string) => request<{ data: ApprovalInsight }>(`/requests/${id}/approval-insight`),
     inbox: () => request<{ data: InboxItem[] }>('/requests/inbox'),
     preview: (body: { employee_id: string; leave_type_id: string; days?: number | null }) =>
       request<{ data: ChainItem[] }>('/requests/preview', { method: 'POST', body: JSON.stringify(body) }),
@@ -1008,6 +1045,21 @@ export const leaveApi = {
   },
 
   reports: {
+    createExport: (body: { report_type: string; format: 'csv' | 'pdf'; filters?: Record<string, string | undefined> }) =>
+      request<{ data: ReportExportDto }>('/reports/exports', { method: 'POST', body: JSON.stringify(body) }),
+    /** Streams the generated file with the bearer token; the browser saves the blob. */
+    downloadExport: async (id: number): Promise<Blob> => {
+      const headers: Record<string, string> = {}
+      if (bearerToken) headers.Authorization = `Bearer ${bearerToken}`
+      const res = await fetch(`/api/reports/exports/${id}/download`, { headers })
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { message?: string } | null
+        throw new ApiError(res.status, body?.message ?? `Download failed (${res.status})`)
+      }
+      return res.blob()
+    },
+    listExports: (params?: { status?: string; report_type?: string; per_page?: number }) =>
+      request<{ data: ReportExportDto[]; meta: ReportPageMeta }>(`/reports/exports${qs(params ?? {})}`),
     zone: (params?: { from?: string; to?: string }) => request<{ data: ZoneReportRow[] }>(`/reports/zone${qs(params ?? {})}`),
     department: (params?: { from?: string; to?: string }) => request<{ data: DepartmentReportRow[] }>(`/reports/department${qs(params ?? {})}`),
     type: (params?: { from?: string; to?: string }) => request<{ data: TypeReportRow[] }>(`/reports/type${qs(params ?? {})}`),
@@ -1039,9 +1091,42 @@ export const leaveApi = {
     paymentHistory: (employeeId: string, params?: ReportFilters) =>
       request<ReportPage<PaymentCaseRow>>(`/reports/payment/employees/${employeeId}/history${qs(params ?? {})}`),
   },
+  leavePayments: {
+    list: () => request<{ data: LeavePaymentCaseDto[] }>('/leave-payments'),
+    create: (body: { employee_id: string; leave_type_id: string; leave_request_id: number; payment_type?: 'leave_encashment' | 'leave_purchase'; salary_basis?: string; salary_amount?: number; days?: number; eligible_days?: number; currency?: string; idempotency_key?: string }) =>
+      request<{ data: LeavePaymentCaseDto }>('/leave-payments', { method: 'POST', body: JSON.stringify(body) }),
+    submit: (id: number) => request<{ data: LeavePaymentCaseDto }>(`/leave-payments/${id}/submit`, { method: 'POST', body: JSON.stringify({}) }),
+    approve: (id: number) => request<{ data: LeavePaymentCaseDto }>(`/leave-payments/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }),
+    reject: (id: number, reason: string) => request<{ data: LeavePaymentCaseDto }>(`/leave-payments/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
+    sendToAccounting: (id: number) => request<{ data: LeavePaymentCaseDto }>(`/leave-payments/${id}/send-to-accounting`, { method: 'POST', body: JSON.stringify({}) }),
+    receive: (id: number) => request<{ data: LeavePaymentCaseDto }>(`/leave-payments/${id}/receive`, { method: 'POST', body: JSON.stringify({}) }),
+    markPaid: (id: number) => request<{ data: LeavePaymentCaseDto }>(`/leave-payments/${id}/paid`, { method: 'POST', body: JSON.stringify({}) }),
+    rejectPayment: (id: number, reason: string) => request<{ data: LeavePaymentCaseDto }>(`/leave-payments/${id}/reject-payment`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  },
+}
+
+export interface PermissionAuditReport {
+  generated_at: string
+  summary: Record<string, number>
+  permissions: Array<{
+    code: string
+    module: string
+    action: string
+    label: string
+    status: string
+    active: boolean
+    is_grantable: boolean
+    enforcement_reference: string | null
+    roles_count: number
+    holders_count: number
+  }>
+  roles: Array<{ id: string; name: string; active: boolean; holders_count: number; permissions: string[] }>
+  approval_roles: Array<Record<string, unknown>>
+  force_delete_holders: Array<Record<string, unknown>>
+  anomalies: Array<{ severity: 'critical' | 'warning' | 'info'; code: string; message: string; entity_type: string | null; entity_id: string | null }>
 }
 // Permission audit (read-only, admin.view)
-export const getPermissionAudit = () => fetch('/api/roles/permissions/audit').then(r => r.json())
+export const getPermissionAudit = () => request<{ data: PermissionAuditReport }>('/roles/permissions/audit')
 
 // Force delete leave request (reason required)
 export const forceDeleteLeaveRequest = (id: string, reason: string) => leaveApi.requests.forceDelete(id, reason)

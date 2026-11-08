@@ -17,6 +17,7 @@ import { LetterView, printLetter } from '@/components/leave/letter-view'
 
 const STEP_TONE: Record<string, { dot: string; text: string; bg: string }> = {
   approved: { dot: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-950/40' },
+  queued: { dot: 'bg-sky-400', text: 'text-sky-700 dark:text-sky-300', bg: 'bg-sky-50 dark:bg-sky-950/40' },
   rejected: { dot: 'bg-rose-500', text: 'text-rose-600 dark:text-rose-400', bg: 'bg-rose-50 dark:bg-rose-950/40' },
   returned: { dot: 'bg-amber-500', text: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-950/40' },
   escalated: { dot: 'bg-orange-500', text: 'text-orange-600 dark:text-orange-400', bg: 'bg-orange-50 dark:bg-orange-950/40' },
@@ -44,7 +45,7 @@ export function RequestDetail({ request, isHr = false }: { request: LeaveRequest
   return (
     <div className="space-y-5">
       {/* Swahili application letter — screen view + isolated-iframe print */}
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-warm dark:bg-muted/30 px-3.5 py-2.5">
+      {(request.status === 'approved' || request.status === 'rejected') && <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-warm dark:bg-muted/30 px-3.5 py-2.5">
         <div className="flex items-center gap-1.5 min-w-0">
           <MailOpen className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           <p className="text-[11px] text-muted-foreground truncate">
@@ -54,7 +55,7 @@ export function RequestDetail({ request, isHr = false }: { request: LeaveRequest
         <Btn variant="outline" onClick={() => setShowLetter(true)}>
           <FileText className="h-3.5 w-3.5" /> Angalia barua
         </Btn>
-      </div>
+      </div>}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="col-span-2 rounded-xl border border-border bg-secondary/50 p-3.5">

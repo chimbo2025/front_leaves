@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
 const API_BASE = process.env.API_BASE ?? 'https://back-leaves.wasmer.dev'
+
 /**
  * Pass-through proxy for /api/* → Laravel backend.
  * The Turbopack `rewrites` config was unreliable here, so this route handler

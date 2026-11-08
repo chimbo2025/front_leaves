@@ -8,7 +8,7 @@ export type Status =
   | 'withdrawn'
   | 'paused_pending_handover'
 
-export type StepStatus = 'pending' | 'approved' | 'rejected' | 'returned' | 'escalated' | 'skipped'
+export type StepStatus = 'pending' | 'queued' | 'approved' | 'rejected' | 'returned' | 'escalated' | 'skipped'
 
 export type ApproverRole =
   | 'SUPERVISOR'
@@ -335,14 +335,17 @@ function priorServiceYearUsed(empId: string, leaveTypeId: string, requests: Leav
   const psy = new Date(toDate(syStart))
   psy.setFullYear(psy.getFullYear() - 1)
   const psyStart = iso(psy)
+  const syStartYear = toDate(syStart)
+  syStartYear.setFullYear(syStartYear.getFullYear() + 1)
+  const annualShared = getLeaveTypeSafe(leaveTypeId)?.code === 'ANNUAL'
   return requests
     .filter(
       (r) =>
         r.employeeId === empId &&
-        r.leaveTypeId === leaveTypeId &&
-        (r.status === 'approved' || r.status === 'under_review') &&
+        (annualShared || r.leaveTypeId === leaveTypeId) &&
+        (r.status === 'approved' || (r.status === 'under_review' && !!r.endDate)) &&
         r.startDate >= psyStart &&
-        r.endDate < syStart,
+        r.startDate < iso(syStartYear),
     )
     .reduce((s, r) => s + r.days, 0)
 }
@@ -548,9 +551,16 @@ export function balanceOf(empId: string, leaveTypeId: string, requests: LeaveReq
   const policy = policiesPool
     ? policiesPool.filter((p) => p.leaveTypeId === leaveTypeId).sort((a, b) => b.version - a.version)[0] ?? getPolicySafe(leaveTypeId)
     : getPolicySafe(leaveTypeId)
+  const annualShared = leave?.code === 'ANNUAL'
+  const serviceStart = emp ? serviceYearStart(emp.hireDate, TODAY) : ''
+  const serviceEndDate = emp ? toDate(serviceStart) : null
+  serviceEndDate?.setFullYear(serviceEndDate.getFullYear() + 1)
   const used = requests
     .filter(
-      (r) => r.employeeId === empId && r.leaveTypeId === leaveTypeId && (r.status === 'approved' || r.status === 'under_review'),
+      (r) => r.employeeId === empId
+        && (annualShared || r.leaveTypeId === leaveTypeId)
+        && (r.status === 'approved' || (r.status === 'under_review' && !!r.endDate))
+        && (!annualShared || (r.startDate >= serviceStart && !!serviceEndDate && r.startDate < iso(serviceEndDate))),
     )
     .reduce((s, r) => s + r.days, 0)
 

@@ -42,7 +42,7 @@ import {
   type Delegation,
   type WorkflowDef,
 } from '@/lib/leave'
-import { ApiError, leaveApi, type ChainItem } from '@/lib/leave-api'
+import { ApiError, leaveApi, type ApprovalInsight, type ChainItem } from '@/lib/leave-api'
 import { useLeave, type EmployeeRow } from '@/components/leave/leave-context'
 import {
   Avatar,
@@ -175,16 +175,34 @@ export function RequestsView() {
   const [deleteReason, setDeleteReason] = useState('')
   const [forceDeleteTarget, setForceDeleteTarget] = useState<LeaveRequest | null>(null)
   const [forceDeleteReason, setForceDeleteReason] = useState('')
-  const [approveTarget, setApproveTarget] = useState<{ request: LeaveRequest; stepOrder: number } | null>(null)
+  const [approveTarget, setApproveTarget] = useState<{ request: LeaveRequest; stepOrder: number; isFinalStep: boolean } | null>(null)
   const [approveReturnDate, setApproveReturnDate] = useState(TODAY)
   // Same signature ceremony as the Approvals queue: the API refuses
   // signature-less approvals, so every Grant path must collect one first.
   const [signatureStep, setSignatureStep] = useState<'pending' | 'completed'>('pending')
   const [signatureData, setSignatureData] = useState<{ path: string | null; hash: string | null }>({ path: null, hash: null })
+  const [approvalInsight, setApprovalInsight] = useState<ApprovalInsight | null>(null)
+  const [approvalInsightLoading, setApprovalInsightLoading] = useState(false)
   const resetSignature = () => {
     setSignatureStep('pending')
     setSignatureData({ path: null, hash: null })
   }
+
+  useEffect(() => {
+    if (!approveTarget?.isFinalStep) {
+      setApprovalInsight(null)
+      setApprovalInsightLoading(false)
+      return
+    }
+    let cancelled = false
+    setApprovalInsight(null)
+    setApprovalInsightLoading(true)
+    leaveApi.requests.approvalInsight(approveTarget.request.id)
+      .then((response) => { if (!cancelled) setApprovalInsight(response.data) })
+      .catch(() => { if (!cancelled) setApprovalInsight(null) })
+      .finally(() => { if (!cancelled) setApprovalInsightLoading(false) })
+    return () => { cancelled = true }
+  }, [approveTarget?.request.id, approveTarget?.isFinalStep])
 
   const employeeById = useMemo(() => new Map(employees.map((e) => [e.id, e])), [employees])
 
@@ -307,7 +325,7 @@ export function RequestsView() {
   // action additionally needs an approve-tier capability plus record scope.
   const canApproveAny = can('requests', 'approve') || can('requests', 'approve_zone')
   const canAct = (r: LeaveRequest) =>
-    r.steps.some((s) => s.status === 'pending' && s.assigneeId === employeeId) ||
+    nextPending(r)?.assigneeId === employeeId ||
     (supervisorMode && canApproveAny && canViewEmployee(r.employeeId))
   const nextPending = (r: LeaveRequest) => r.steps.find((s) => s.status === 'pending')
 
@@ -349,12 +367,16 @@ export function RequestsView() {
   }
 
   const deletingDraft = deleteTarget?.status === 'draft'
+  const approvalAnnualBalance = approveTarget ? balanceFor(approveTarget.request.employeeId, annualTypeId) : null
+  const approvalProposedDays = approveTarget && approveReturnDate
+    ? dayCount(approveTarget.request.startDate, approveReturnDate)
+    : 0
 
   const buildMenu = (r: LeaveRequest): RowMenuItem[] => {
     const items: RowMenuItem[] = [{ icon: Eye, label: 'View details', onClick: () => setDetail(r) }]
     const step = nextPending(r)
     if (canAct(r) && step) {
-      items.push({ icon: Check, label: 'Approve', onClick: () => { setApproveTarget({ request: r, stepOrder: step.order }); setApproveReturnDate(r.startDate >= TODAY ? r.startDate : TODAY); resetSignature() } })
+      items.push({ icon: Check, label: 'Approve', onClick: () => { setApproveTarget({ request: r, stepOrder: step.order, isFinalStep: r.steps.filter((s) => s.status === 'pending').length === 1 }); setApproveReturnDate(r.startDate >= TODAY ? r.startDate : TODAY); resetSignature() } })
       items.push({ icon: RotateCcw, label: 'Return to applicant', onClick: () => decide(r.id, step.order, 'returned', '(from list)') })
       items.push({ icon: X, label: 'Reject', tone: 'danger', onClick: () => decide(r.id, step.order, 'rejected', '(from list)') })
     }
@@ -799,7 +821,7 @@ export function RequestsView() {
         footer={
           detail && canAct(detail) && nextPending(detail) ? (
             <div className="flex flex-wrap items-center gap-2">
-              <Btn variant="emerald" onClick={() => { const s = nextPending(detail)!; setApproveTarget({ request: detail, stepOrder: s.order }); setApproveReturnDate(detail.startDate >= TODAY ? detail.startDate : TODAY); setDetail(null) }}>
+              <Btn variant="emerald" onClick={() => { const s = nextPending(detail)!; setApproveTarget({ request: detail, stepOrder: s.order, isFinalStep: detail.steps.filter((step) => step.status === 'pending').length === 1 }); setApproveReturnDate(detail.startDate >= TODAY ? detail.startDate : TODAY); setDetail(null) }}>
                 <Check className="w-3.5 h-3.5" /> Approve
               </Btn>
               <Btn variant="outline" className="border-orange-300 text-orange-700 hover:bg-orange-50 dark:text-orange-300 dark:hover:bg-orange-950" onClick={() => { const s = nextPending(detail)!; decide(detail.id, s.order, 'returned', '(from detail)'); setDetail(null) }}>
@@ -912,17 +934,17 @@ export function RequestsView() {
         open={approveTarget !== null}
         onClose={() => { setApproveTarget(null); resetSignature() }}
         title={approveTarget ? `Approve ${approveTarget.request.ref}` : 'Approve request'}
-        subtitle="Grant the leave and set the return date. This decides the number of days and finalises the record."
+        subtitle={approveTarget?.isFinalStep ? 'Final approver sets the return date and granted leave duration.' : 'Record your decision. The final approver will set the return date and duration.'}
         size="md"
         footer={
           signatureStep === 'completed' ? (
           <div className="flex items-center gap-2">
             <Btn
               variant="emerald"
-              disabled={!approveReturnDate}
+              disabled={approveTarget?.isFinalStep === true && !approveReturnDate}
               onClick={() => {
                 if (!approveTarget) return
-                decide(approveTarget.request.id, approveTarget.stepOrder, 'approved', '(approved with return date)', approveReturnDate, signatureData.path ?? undefined, signatureData.hash ?? undefined)
+                decide(approveTarget.request.id, approveTarget.stepOrder, 'approved', '(approved)', approveTarget.isFinalStep ? approveReturnDate : undefined, signatureData.path ?? undefined, signatureData.hash ?? undefined)
                 resetSignature()
                 setApproveTarget(null)
               }}
@@ -960,16 +982,38 @@ export function RequestsView() {
                 {approveTarget.request.reason || 'No reason given.'}
               </p>
             </div>
-            <TextInput
-              type="date"
-              label="Return to work date"
-              hint="The day the employee resumes duty; leave days are counted up to the day before this date."
-              value={approveReturnDate}
-              onChange={(e) => setApproveReturnDate(e.target.value)}
-            />
-            <p className="text-[12px] font-mono text-foreground">
-              {approveReturnDate ? `≈ ${fmtShort(approveTarget.request.startDate)} → ${fmtShort(approveReturnDate)} · ${dayCount(approveTarget.request.startDate, approveReturnDate)} day${dayCount(approveTarget.request.startDate, approveReturnDate) === 1 ? '' : 's'}` : 'Set the return date to grant leave.'}
-            </p>
+            {approveTarget.isFinalStep ? (
+              <>
+                <TextInput
+                  type="date"
+                  label="Return to work date"
+                  hint="The day the employee resumes duty; leave days are counted up to the day before this date."
+                  value={approveReturnDate}
+                  onChange={(e) => setApproveReturnDate(e.target.value)}
+                />
+                <p className="text-[12px] font-mono text-foreground">
+                  {approveReturnDate ? `≈ ${fmtShort(approveTarget.request.startDate)} → ${fmtShort(approveReturnDate)} · ${approvalProposedDays} day${approvalProposedDays === 1 ? '' : 's'}` : 'Set the return date to grant leave.'}
+                </p>
+                {(approvalInsight?.annual_balance ?? approvalAnnualBalance) && (
+                  <div className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-[12px] text-teal-900 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-200">
+                    Shared annual balance: {(approvalInsight?.annual_balance ?? approvalAnnualBalance)!.remaining} days before this request; approximately {Math.max(0, (approvalInsight?.annual_balance ?? approvalAnnualBalance)!.remaining - approvalProposedDays)} after approval. Approved days from all leave types count in this service year.
+                  </div>
+                )}
+                {approveTarget.request.leaveTypeId === annualTypeId && (
+                  <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12px] text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200">
+                    {approvalInsightLoading
+                      ? 'Checking the employee’s annual payment cycle…'
+                      : approvalInsight?.annual_request_number
+                        ? `Annual request #${approvalInsight.annual_request_number} this service year. ${approvalInsight.payment_eligible ? 'Eligible for HR payment review after approval.' : 'Not eligible for payment review in the every-second-request cycle.'}`
+                        : 'Payment-cycle insight is unavailable; HR can check eligibility after approval.'}
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12px] text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200">
+                This is an intermediate approval step. The return date and granted days are reserved for the final approver.
+              </p>
+            )}
           </div>
             )}
           </>

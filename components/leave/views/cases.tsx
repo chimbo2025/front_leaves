@@ -272,7 +272,7 @@ export function CasesView() {
                         </span>
                       </td>
                       <td className="py-3 px-3 text-right">
-                        <RowMenu items={buildMenu(c)} align="left" />
+                        <RowMenu items={buildMenu(c)} align="right" />
                       </td>
                     </tr>
                   )

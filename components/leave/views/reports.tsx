@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
+import { toast } from 'sonner'
 import {
   TrendingUp,
   Users,
@@ -31,7 +32,7 @@ import {
   type LeaveRequest,
 } from '@/lib/leave'
 import { useLeave } from '@/components/leave/leave-context'
-import { SectionHeading, Panel, StatCard, Btn, Avatar, Tabs, Modal, Pagination, usePaged } from '@/components/leave/shared'
+import { SectionHeading, Panel, StatCard, Btn, Avatar, Tabs, Modal, Pagination, usePaged, SelectInput, TextInput } from '@/components/leave/shared'
 import {
   leaveApi,
   ApiError,
@@ -44,6 +45,7 @@ import {
   type DetailStaffRow,
   type PaymentCaseRow,
   type PaymentPairRow,
+  type LeavePaymentCaseDto,
 } from '@/lib/leave-api'
 import { RequestDetail } from '@/components/leave/request-detail'
 
@@ -53,6 +55,20 @@ const ZoneUsageChart = dynamic(() => import('./reports-charts').then((m) => ({ d
 const TypeUsageChart = dynamic(() => import('./reports-charts').then((m) => ({ default: m.TypeUsageChart })), { ssr: false })
 const StatusMixChart = dynamic(() => import('./reports-charts').then((m) => ({ default: m.StatusMixChart })), { ssr: false })
 const MonthlyDaysChart = dynamic(() => import('./reports-charts').then((m) => ({ default: m.MonthlyDaysChart })), { ssr: false })
+
+const REPORT_DATASETS = [
+  ['leave_requests', 'Leave requests'],
+  ['employee_history', 'Employee leave history'],
+  ['leave_plans', 'Leave plans'],
+  ['waivers', 'Leave waivers'],
+  ['returns', 'Return-to-work cases'],
+  ['balance', 'Leave balances'],
+  ['payments', 'Payment cases'],
+  ['policies', 'Policies'],
+  ['approval_performance', 'Approval performance'],
+  ['documents', 'Official documents'],
+  ['audit', 'Audit history'],
+] as const
 
 const STATUS_COLORS: Record<string, string> = {
   draft: '#64748b',
@@ -88,7 +104,7 @@ function readReportQuery(): URLSearchParams {
 }
 
 export function ReportsView() {
-  const { requests, supervisorMode, canViewEmployee, leaveTypes, can, hasPerm, employeeId, allZones, employees } = useLeave()
+  const { requests, supervisorMode, canViewEmployee, leaveTypes, can, hasPerm, employeeId, allZones, allDepts, employees } = useLeave()
   // Tab + range live in the URL so a filtered view is shareable and survives
   // reloads. window.location is read lazily (no Suspense boundary needed).
   // The redesign folds the old per-topic tabs into four sections; legacy
@@ -108,6 +124,14 @@ export function ReportsView() {
   })
   const [from, setFrom] = useState(() => readReportQuery().get('from') ?? '')
   const [to, setTo] = useState(() => readReportQuery().get('to') ?? '')
+  const [exportDataset, setExportDataset] = useState<string>('leave_requests')
+  const [exportFormat, setExportFormat] = useState<'csv' | 'pdf'>('csv')
+  const [exportZone, setExportZone] = useState('')
+  const [exportDepartment, setExportDepartment] = useState('')
+  const [exportEmployee, setExportEmployee] = useState('')
+  const [exportLeaveType, setExportLeaveType] = useState('')
+  const [exportStatus, setExportStatus] = useState('')
+  const [exportBusy, setExportBusy] = useState(false)
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search)
@@ -124,6 +148,7 @@ export function ReportsView() {
   const canLegacyReports = hasPerm('reports.view')
   const canPayments = hasPerm('reports.view_financial') || hasPerm('leave_payments.view_cross_zone')
   const canOwnHistory = hasPerm('reports.view_own')
+  const canExport = hasPerm('reports.export')
 
   const rangeParams: ReportFilters = {
     ...(from ? { from } : {}),
@@ -419,6 +444,43 @@ export function ReportsView() {
     URL.revokeObjectURL(url)
   }
 
+  const exportFullReport = async () => {
+    if (!canExport || exportBusy) return
+    setExportBusy(true)
+    try {
+      const created = await leaveApi.reports.createExport({
+        report_type: exportDataset,
+        format: exportFormat,
+        filters: {
+          ...(from ? { date_from: from } : {}),
+          ...(to ? { date_to: to } : {}),
+          ...(exportZone ? { zone_id: exportZone } : {}),
+          ...(exportDepartment ? { department_id: exportDepartment } : {}),
+          ...(exportEmployee ? { employee_id: exportEmployee } : {}),
+          ...(exportLeaveType ? { leave_type_id: exportLeaveType } : {}),
+          ...(exportStatus ? { status: exportStatus } : {}),
+        },
+      })
+      if (created.data.status !== 'completed' || !created.data.is_downloadable) {
+        throw new Error(created.data.failure_reason || 'The report export did not complete.')
+      }
+      const blob = await leaveApi.reports.downloadExport(created.data.id)
+      const objectUrl = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = objectUrl
+      link.download = `${exportDataset}-${created.data.id}.${exportFormat}`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 2000)
+      toast.success(`Export ready · ${created.data.row_count ?? 0} rows`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not export this report.')
+    } finally {
+      setExportBusy(false)
+    }
+  }
+
   return (
     <div className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-8 py-6 space-y-6">
       <SectionHeading
@@ -468,6 +530,50 @@ export function ReportsView() {
           {from || to ? ` Showing ${from || 'start'} → ${to || 'today'}.` : ' Showing the full leave year.'}
         </span>
       </div>
+
+      {canExport && (
+        <Panel
+          title="Export detailed report rows"
+          subtitle="Choose a dataset and filters. The export contains the records that make up the report, not only its summary totals."
+          actions={
+            <div className="flex items-center gap-2">
+              <SelectInput label="Format" value={exportFormat} onChange={(e) => setExportFormat(e.target.value as 'csv' | 'pdf')}>
+                <option value="csv">CSV</option>
+                <option value="pdf">PDF</option>
+              </SelectInput>
+              <Btn onClick={() => void exportFullReport()} disabled={exportBusy}>
+                <Download className="w-4 h-4" /> {exportBusy ? 'Preparing…' : 'Export rows'}
+              </Btn>
+            </div>
+          }
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+            <SelectInput label="Report dataset" value={exportDataset} onChange={(e) => setExportDataset(e.target.value)}>
+              {REPORT_DATASETS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+            </SelectInput>
+            <SelectInput label="Zone" value={exportZone} onChange={(e) => setExportZone(e.target.value)}>
+              <option value="">All in my report scope</option>
+              {allZones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name}</option>)}
+            </SelectInput>
+            <SelectInput label="Department / section" value={exportDepartment} onChange={(e) => setExportDepartment(e.target.value)}>
+              <option value="">All in my report scope</option>
+              {allDepts.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
+            </SelectInput>
+            <SelectInput label="Employee" value={exportEmployee} onChange={(e) => setExportEmployee(e.target.value)}>
+              <option value="">All in my report scope</option>
+              {employees.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}
+            </SelectInput>
+            <SelectInput label="Leave type" value={exportLeaveType} onChange={(e) => setExportLeaveType(e.target.value)}>
+              <option value="">All leave types</option>
+              {leaveTypes.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
+            </SelectInput>
+            <SelectInput label="Status" value={exportStatus} onChange={(e) => setExportStatus(e.target.value)}>
+              <option value="">All statuses</option>
+              {['draft', 'submitted', 'under_review', 'approved', 'rejected', 'returned_for_correction', 'withdrawn', 'paid', 'processing', 'sent_to_accounting'].map((status) => <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>)}
+            </SelectInput>
+          </div>
+        </Panel>
+      )}
 
       <Tabs
         tabs={[
@@ -775,22 +881,25 @@ export function ReportsView() {
       )}
 
       {tab === 'payments' && (
-        <PaymentOverviewPanel
-          paySummary={paySummary}
-          payDenied={payDenied}
-          canPayments={canPayments}
-          canOwnHistory={canOwnHistory}
-          ownEmployeeId={employeeId}
-          rangeParams={rangeParams}
-          payCat={payCat}
-          setPayCat={setPayCat}
-          payHistory={payHistory}
-          setPayHistory={setPayHistory}
-          openRequestDetail={(id) => {
-            const found = requests.find((r) => String(r.id) === String(id))
-            if (found) setDetailRequest(found)
-          }}
-        />
+        <>
+          <PaymentOverviewPanel
+            paySummary={paySummary}
+            payDenied={payDenied}
+            canPayments={canPayments}
+            canOwnHistory={canOwnHistory}
+            ownEmployeeId={employeeId}
+            rangeParams={rangeParams}
+            payCat={payCat}
+            setPayCat={setPayCat}
+            payHistory={payHistory}
+            setPayHistory={setPayHistory}
+            openRequestDetail={(id) => {
+              const found = requests.find((r) => String(r.id) === String(id))
+              if (found) setDetailRequest(found)
+            }}
+          />
+          <PaymentOperationsPanel />
+        </>
       )}
 
       {detail && canLegacyReports && (
@@ -816,8 +925,295 @@ export function ReportsView() {
       >
         {detailRequest ? <RequestDetail request={detailRequest} isHr={can('documents', 'view_medical_documents')} /> : null}
       </Modal>
+
+      {/* Browser print includes the individual records behind the overview
+          totals, not just the charts and cards. The server-side PDF/CSV export
+          carries the same rows for archival. */}
+      {tab === 'overview' && canLegacyReports && (
+        <section className="hidden print:block mt-6">
+          <h2 className="text-[15px] font-bold text-foreground">
+            Individual requests behind the totals
+          </h2>
+          <p className="mt-1 mb-3 text-[11px] text-muted-foreground">
+            {from || to ? `${from || 'start'} → ${to || 'today'}` : 'Full leave year'} · {visible.length} record{visible.length === 1 ? '' : 's'}
+          </p>
+          <table className="w-full border-collapse text-left text-[9px]">
+            <thead>
+              <tr>
+                {['Reference', 'Employee', 'Leave type', 'Start', 'End', 'Days', 'Status'].map((heading) => (
+                  <th key={heading} className="border border-slate-400 bg-slate-100 px-2 py-1 font-semibold">{heading}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {visible.length === 0 ? (
+                <tr><td colSpan={7} className="border border-slate-400 px-2 py-2">No requests match these filters.</td></tr>
+              ) : visible.map((r) => (
+                <tr key={r.id}>
+                  <td className="border border-slate-300 px-2 py-1 font-mono">{r.ref}</td>
+                  <td className="border border-slate-300 px-2 py-1">{getEmployee(r.employeeId)?.name ?? r.employeeId}</td>
+                  <td className="border border-slate-300 px-2 py-1">{leaveTypes.find((t) => t.id === r.leaveTypeId)?.name ?? r.leaveTypeId}</td>
+                  <td className="border border-slate-300 px-2 py-1 whitespace-nowrap">{fmtShort(r.startDate)}</td>
+                  <td className="border border-slate-300 px-2 py-1 whitespace-nowrap">{r.endDate ? fmtShort(r.endDate) : '—'}</td>
+                  <td className="border border-slate-300 px-2 py-1 text-right">{r.days}</td>
+                  <td className="border border-slate-300 px-2 py-1">{STATUS_LABELS[r.status] ?? r.status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
       </>
       )}
+    </div>
+  )
+}
+
+function PaymentOperationsPanel() {
+  const { requests, employees, annualTypeId, can } = useLeave()
+  const canCreate = can('leave_payments', 'create')
+  const canReview = can('leave_payments', 'review')
+  const canApprove = can('leave_payments', 'approve')
+  const canReject = can('leave_payments', 'reject')
+  const canReceive = can('leave_payments', 'receive')
+  const canProcess = can('leave_payments', 'process')
+  const canOperate = canCreate || canReview || canApprove || canReject || canReceive || canProcess
+  const [cases, setCases] = useState<LeavePaymentCaseDto[]>([])
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [loading, setLoading] = useState(false)
+  const [busyId, setBusyId] = useState<number | null>(null)
+  const [createTarget, setCreateTarget] = useState<LeaveRequest | null>(null)
+  const [salaryAmount, setSalaryAmount] = useState('')
+  const [salaryBasis, setSalaryBasis] = useState('monthly_salary')
+  const [createBusy, setCreateBusy] = useState(false)
+  // One row link opens everything for that case; the old design printed up to
+  // two action buttons in every row (the "button soup" the mockup removed).
+  const [manageTarget, setManageTarget] = useState<LeavePaymentCaseDto | null>(null)
+
+  const loadCases = async () => {
+    if (!canOperate) return
+    setLoading(true)
+    try {
+      const response = await leaveApi.leavePayments.list()
+      setCases(response.data)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Payment cases could not be loaded.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { void loadCases() }, [canOperate])
+  if (!canOperate) return null
+
+  const approvedAnnual = requests
+    .filter((r) => r.leaveTypeId === annualTypeId && r.status === 'approved' && r.days > 0)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const existingRequestIds = new Set(cases.map((c) => c.leave_request_id).filter((id): id is number => id !== null))
+  const visibleCases = cases.filter((item) => statusFilter === 'all' || item.status === statusFilter)
+  const employeeName = (id: string | null) => employees.find((e) => e.id === id)?.name ?? id ?? 'Former employee'
+  const requestRef = (id: number | null) => requests.find((r) => String(r.id) === String(id))?.ref ?? (id ? `Request #${id}` : '—')
+
+  const prepareCase = async (request: LeaveRequest) => {
+    if (existingRequestIds.has(Number(request.id))) {
+      toast.info('A payment case already exists for this leave request.')
+      return
+    }
+    try {
+      const { data } = await leaveApi.requests.approvalInsight(request.id)
+      if (!data.payment_eligible) {
+        toast.info(data.annual_request_number
+          ? `Annual request #${data.annual_request_number} is not payable under the every-second-request rule.`
+          : 'Payment eligibility could not be determined.')
+        return
+      }
+      setCreateTarget(request)
+      setSalaryAmount('')
+      setSalaryBasis('monthly_salary')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Payment eligibility could not be checked.')
+    }
+  }
+
+  const createPaymentCase = async () => {
+    if (!createTarget || Number(salaryAmount) <= 0) return
+    setCreateBusy(true)
+    try {
+      await leaveApi.leavePayments.create({
+        employee_id: createTarget.employeeId,
+        leave_type_id: createTarget.leaveTypeId,
+        leave_request_id: Number(createTarget.id),
+        payment_type: 'leave_encashment',
+        salary_basis: salaryBasis,
+        salary_amount: Number(salaryAmount),
+        days: createTarget.days,
+        eligible_days: createTarget.days,
+        currency: 'TZS',
+        idempotency_key: `annual-encashment:${createTarget.id}`,
+      })
+      toast.success('Payment case created. Submit it for HR review when ready.')
+      setCreateTarget(null)
+      await loadCases()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Payment case could not be created.')
+    } finally {
+      setCreateBusy(false)
+    }
+  }
+
+  const transition = async (id: number, action: () => Promise<unknown>, success: string) => {
+    setBusyId(id)
+    try {
+      await action()
+      toast.success(success)
+      setManageTarget(null)
+      await loadCases()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Payment case could not be updated.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const rejectCase = (item: LeavePaymentCaseDto, payment: boolean) => {
+    const reason = window.prompt(payment ? 'Reason for rejecting payment' : 'Reason for rejecting HR review')?.trim()
+    if (!reason) return
+    void transition(item.id, () => payment ? leaveApi.leavePayments.rejectPayment(item.id, reason) : leaveApi.leavePayments.reject(item.id, reason), 'Payment case updated.')
+  }
+
+  // Re-read the live row so the dialog reflects the latest status/amounts.
+  const manage = manageTarget ? cases.find((c) => c.id === manageTarget.id) ?? manageTarget : null
+  const manageActions = manage ? [
+    manage.status === 'pending' && canCreate ? { label: 'Submit to HR', run: () => transition(manage.id, () => leaveApi.leavePayments.submit(manage.id), 'Sent for HR review.') } : null,
+    manage.status === 'under_hr_review' && canApprove ? { label: 'Approve', run: () => transition(manage.id, () => leaveApi.leavePayments.approve(manage.id), 'Payment eligibility approved.') } : null,
+    manage.status === 'under_hr_review' && canReject ? { label: 'Reject', run: () => rejectCase(manage, false) } : null,
+    manage.status === 'hr_approved' && canReview ? { label: 'Send to Accounting', run: () => transition(manage.id, () => leaveApi.leavePayments.sendToAccounting(manage.id), 'Sent to Accounting.') } : null,
+    manage.status === 'sent_to_accounting' && canReceive ? { label: 'Receive', run: () => transition(manage.id, () => leaveApi.leavePayments.receive(manage.id), 'Received by Accounting.') } : null,
+    manage.status === 'processing' && canProcess ? { label: 'Mark paid', run: () => transition(manage.id, () => leaveApi.leavePayments.markPaid(manage.id), 'Marked as paid.') } : null,
+    ['sent_to_accounting', 'processing'].includes(manage.status) && canProcess ? { label: 'Reject payment', run: () => rejectCase(manage, true) } : null,
+  ].filter((a): a is { label: string; run: () => void } => a !== null) : []
+
+  return (
+    <div className="space-y-5">
+      {canCreate && (
+        <Panel title="Annual leave payment eligibility" subtitle="Only every second approved annual-leave request in an employee’s service year is eligible to be submitted for HR/payment review.">
+          {approvedAnnual.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No approved annual leave requests are currently in your request scope.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] text-left text-xs">
+                <thead><tr className="border-b border-border text-muted-foreground"><th className="py-2 pr-3">Employee</th><th className="py-2 pr-3">Reference</th><th className="py-2 pr-3">Period</th><th className="py-2 pr-3">Days</th><th className="py-2 text-right">Action</th></tr></thead>
+                <tbody>{approvedAnnual.map((item) => (
+                  <tr key={item.id} className="border-b border-border/60">
+                    <td className="py-2 pr-3">{employeeName(item.employeeId)}</td>
+                    <td className="py-2 pr-3 font-mono">{item.ref}</td>
+                    <td className="py-2 pr-3">{fmtShort(item.startDate)}{item.endDate ? ` → ${fmtShort(item.endDate)}` : ''}</td>
+                    <td className="py-2 pr-3">{item.days}</td>
+                    <td className="py-2 text-right">{existingRequestIds.has(Number(item.id)) ? <span className="text-muted-foreground">Case exists</span> : <button type="button" onClick={() => void prepareCase(item)} className="text-[12px] font-semibold text-teal-700 dark:text-teal-300 hover:underline whitespace-nowrap" title="Check payment eligibility and create a case">Check →</button>}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+        </Panel>
+      )}
+
+      <Panel
+        title="Payment case workflow"
+        subtitle="HR reviews and sends eligible cases to Accounting; Accounting receives and marks them paid. This list contains payment cases, not general leave requests."
+        actions={
+          <div className="flex items-center gap-2">
+            <SelectInput label="Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="all">All visible</option>
+              {['pending', 'under_hr_review', 'hr_approved', 'hr_rejected', 'sent_to_accounting', 'processing', 'paid', 'payment_rejected', 'cancelled'].map((status) => <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>)}
+            </SelectInput>
+            <Btn variant="outline" onClick={() => void loadCases()} disabled={loading}>Refresh</Btn>
+          </div>
+        }
+      >
+        {loading ? <p className="text-xs text-muted-foreground">Loading payment cases…</p> : visibleCases.length === 0 ? <p className="text-xs text-muted-foreground">No payment cases in this status and scope.</p> : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[820px] text-left text-xs">
+              <thead><tr className="border-b border-border text-muted-foreground"><th className="py-2 pr-3">Employee</th><th className="py-2 pr-3">Leave ref</th><th className="py-2 pr-3">Status</th><th className="py-2 pr-3">Eligible amount</th><th className="py-2 pr-3">Payable amount</th><th className="py-2 text-right">Action</th></tr></thead>
+              <tbody>{visibleCases.map((item) => (
+                <tr key={item.id} className="border-b border-border/60">
+                  <td className="py-2 pr-3">{employeeName(item.employee_id)}</td>
+                  <td className="py-2 pr-3 font-mono">{requestRef(item.leave_request_id)}</td>
+                  <td className="py-2 pr-3">{item.status.replaceAll('_', ' ')}</td>
+                  <td className="py-2 pr-3">{item.eligible_amount ?? '—'} {item.currency ?? ''}</td>
+                  <td className="py-2 pr-3">{item.calculated_amount ?? '—'} {item.currency ?? ''}</td>
+                  <td className="py-2 text-right">
+                    <button
+                      type="button"
+                      disabled={busyId === item.id}
+                      onClick={() => setManageTarget(item)}
+                      className="text-[12px] font-semibold text-teal-700 dark:text-teal-300 hover:underline whitespace-nowrap disabled:opacity-50"
+                      title="Open this payment case"
+                    >
+                      {busyId === item.id ? 'Working…' : 'View →'}
+                    </button>
+                  </td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
+
+      <Modal open={createTarget !== null} onClose={() => { if (!createBusy) setCreateTarget(null) }} title="Create annual-leave payment case" subtitle={createTarget ? `${createTarget.ref} · ${employeeName(createTarget.employeeId)}` : ''} size="md" footer={<div className="flex justify-end gap-2"><Btn variant="ghost" onClick={() => setCreateTarget(null)} disabled={createBusy}>Cancel</Btn><Btn onClick={() => void createPaymentCase()} disabled={!createTarget || Number(salaryAmount) <= 0 || createBusy}>{createBusy ? 'Creating…' : 'Create case'}</Btn></div>}>
+        <div className="space-y-3">
+          <TextInput label="Salary basis" value={salaryBasis} onChange={(e) => setSalaryBasis(e.target.value)} />
+          <TextInput label="Salary amount (TZS)" type="number" min="0" value={salaryAmount} onChange={(e) => setSalaryAmount(e.target.value)} />
+          <p className="text-xs text-muted-foreground">Payment eligibility is checked again by the server. Creating this case does not mark it paid.</p>
+        </div>
+      </Modal>
+
+      <Modal
+        open={manage !== null}
+        onClose={() => setManageTarget(null)}
+        title={manage ? `Payment case #${manage.id}` : 'Payment case'}
+        subtitle={manage ? `${employeeName(manage.employee_id)} · ${requestRef(manage.leave_request_id)}` : ''}
+        size="md"
+      >
+        {manage && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 text-[13px]">
+              <div>
+                <span className="block text-[11px] uppercase tracking-wide text-muted-foreground">Status</span>
+                <span className="font-semibold text-foreground">{manage.status.replaceAll('_', ' ')}</span>
+              </div>
+              <div>
+                <span className="block text-[11px] uppercase tracking-wide text-muted-foreground">Eligible amount</span>
+                <span className="font-semibold text-foreground">{manage.eligible_amount ?? '—'} {manage.currency ?? ''}</span>
+              </div>
+              <div>
+                <span className="block text-[11px] uppercase tracking-wide text-muted-foreground">Payable amount</span>
+                <span className="font-semibold text-foreground">{manage.calculated_amount ?? '—'} {manage.currency ?? ''}</span>
+              </div>
+              <div>
+                <span className="block text-[11px] uppercase tracking-wide text-muted-foreground">Leave request</span>
+                <span className="font-semibold text-foreground">{requestRef(manage.leave_request_id)}</span>
+              </div>
+            </div>
+            {manageActions.length === 0 && (
+              <p className="text-[12px] text-muted-foreground">No action is available for your role at this stage.</p>
+            )}
+            <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-3">
+              <Btn variant="ghost" onClick={() => setManageTarget(null)} disabled={busyId === manage.id}>Close</Btn>
+              {manageActions.map((action) => (
+                <Btn
+                  key={action.label}
+                  variant={action.label.includes('Reject') ? 'danger' : action.label === 'Mark paid' ? 'emerald' : 'outline'}
+                  onClick={action.run}
+                  disabled={busyId === manage.id}
+                >
+                  {busyId === manage.id ? 'Working…' : action.label}
+                </Btn>
+              ))}
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

@@ -340,9 +340,10 @@ async function safe<T>(p: Promise<T>): Promise<T | undefined> {
 // Backend → view adapters
 // ---------------------------------------------------------------------------
 
-function stepStatus(s: 'pending' | 'done' | 'skipped'): StepStatus {
+function stepStatus(s: 'pending' | 'queued' | 'done' | 'skipped'): StepStatus {
   if (s === 'done') return 'approved'
   if (s === 'skipped') return 'skipped'
+  if (s === 'queued') return 'queued'
   return 'pending'
 }
 
@@ -1056,7 +1057,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
     // payloads, which means the row is live.
     const liveRoles = (rolesRes?.data ?? []).filter((r) => r.active !== false)
 
-    if (liveRoles.length > 0 && liveRoles.some((r) => (r.permissions ?? []).length > 0)) {
+    if (rolesRes?.data) {
       const matrix: Record<string, Record<string, string[]>> = {}
       for (const role of liveRoles) {
         const byModule: Record<string, string[]> = {}
@@ -1065,6 +1066,8 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       }
       setRolePermissions(matrix)
     } else {
+      // Static values are only an offline fallback. An empty live matrix is
+      // valid data and must not be replaced by grants the database doesn't hold.
       setRolePermissions(JSON.parse(JSON.stringify(SEED_ROLE_PERMISSIONS)))
     }
 

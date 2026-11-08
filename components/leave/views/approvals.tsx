@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useCallback } from 'react'
+import { useMemo, useState, useCallback, useEffect } from 'react'
 import React from 'react'
 import {
   Check,
@@ -51,9 +51,11 @@ import {
 } from '@/components/leave/shared'
 import { RequestDetail } from '@/components/leave/request-detail'
 import { ApprovalModal } from '@/components/leave/approval-modal'
+import { leaveApi, type ApprovalInsight } from '@/lib/leave-api'
 
 const STEP_STYLE: Record<StepStatus, string> = {
   pending: 'border-border bg-warm dark:bg-muted/30',
+  queued: 'border-sky-200 bg-sky-50/60 dark:bg-sky-950/30 dark:border-sky-900',
   approved: 'border-emerald-200 bg-emerald-50 dark:bg-emerald-950 dark:border-emerald-900',
   rejected: 'border-rose-200 bg-rose-50 dark:bg-rose-950 dark:border-rose-900',
   returned: 'border-orange-200 bg-orange-50 dark:bg-orange-950 dark:border-orange-900',
@@ -62,29 +64,50 @@ const STEP_STYLE: Record<StepStatus, string> = {
 }
 
 export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void }) {
-  const { employee, employeeId, supervisorMode, canViewEmployee, requests, leaveTypes, cases, handovers, decide, typeOf, acceptHandover, can } = useLeave()
+  const { employee, employeeId, supervisorMode, requests, leaveTypes, cases, handovers, decide, typeOf, acceptHandover, can, balanceFor, annualTypeId } = useLeave()
   const [openId, setOpenId] = useState<string | null>(null)
   const [tab, setTab] = useState('queue')
   const [comments, setComments] = useState<Record<string, string>>({})
   const [detail, setDetail] = useState<LeaveRequest | null>(null)
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
-  const [approveTarget, setApproveTarget] = useState<{ request: LeaveRequest; stepOrder: number } | null>(null)
+  const [approveTarget, setApproveTarget] = useState<{ request: LeaveRequest; stepOrder: number; isFinalStep: boolean } | null>(null)
   const [approveReturnDate, setApproveReturnDate] = useState(TODAY)
   const [approveComment, setApproveComment] = useState('')
   const [signatureStep, setSignatureStep] = useState<'pending' | 'completed'>('pending')
   const [signatureData, setSignatureData] = useState<{ path: string | null; hash: string | null }>({ path: null, hash: null })
+  const [approvalInsight, setApprovalInsight] = useState<ApprovalInsight | null>(null)
+  const [approvalInsightLoading, setApprovalInsightLoading] = useState(false)
+
+  useEffect(() => {
+    if (!approveTarget) {
+      setApprovalInsight(null)
+      setApprovalInsightLoading(false)
+      return
+    }
+    let cancelled = false
+    setApprovalInsight(null)
+    setApprovalInsightLoading(true)
+    leaveApi.requests.approvalInsight(approveTarget.request.id)
+      .then((response) => { if (!cancelled) setApprovalInsight(response.data) })
+      .catch(() => { if (!cancelled) setApprovalInsight(null) })
+      .finally(() => { if (!cancelled) setApprovalInsightLoading(false) })
+    return () => { cancelled = true }
+  }, [approveTarget?.request.id])
 
   const nextStep = (r: LeaveRequest) => r.steps.find((s) => s.status === 'pending')
-  const canApproveAny = can('requests', 'approve') || can('requests', 'approve_zone')
-  const canAct = (r: LeaveRequest) => {
-    const assigned = r.steps.some((s) => s.status === 'pending' && s.assigneeId === employeeId)
-    if (assigned) return true
-    if (!supervisorMode || !canApproveAny) return false
-    // Mirrors the server AccessScopeService: cross-zone, zone and department
-    // grants all count, so a DEPT_HEAD is no longer limited to their zone.
-    return canViewEmployee(r.employeeId)
+  // Later steps stay `queued` until their turn, so counting pending steps made
+  // every intermediate approver look final. The current step is final only
+  // when nothing actionable remains after it (optional steps may be skipped).
+  const isFinalStep = (r: LeaveRequest) => {
+    const index = r.steps.findIndex((s) => s.status === 'pending')
+    return index >= 0 && r.steps.slice(index + 1).every((s) => s.status === 'skipped')
   }
+  const canApproveAny = can('requests', 'approve') || can('requests', 'approve_zone')
+  // Only the current owner may act. Scope-wide visibility belongs on the
+  // all-in-flight tab; the actionable queue must not offer decisions that the
+  // server will reject as "not assigned".
+  const canAct = (r: LeaveRequest) => Boolean(canApproveAny && nextStep(r)?.assigneeId === employeeId)
   const pendingHoFor = (r: LeaveRequest) => {
     const c = caseFor(r.id, cases)
     return c ? pendingHandoversFor(c.id, handovers).find((h) => h.toOwnerId === employeeId) : undefined
@@ -104,7 +127,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
     // yet) have no pending step — they must not enter the queue, otherwise
     // the sort and row render below crash on `undefined.dueAt`.
     const q = inFlight.filter(
-      (r) => nextStep(r) !== undefined && (r.steps.some((s) => s.status === 'pending' && s.assigneeId === employeeId) || (supervisorMode && canViewEmployee(r.employeeId))),
+      (r) => nextStep(r)?.assigneeId === employeeId,
     )
     const filtered = q.filter((r) => {
       if (typeFilter !== 'all' && r.leaveTypeId !== typeFilter) return false
@@ -115,7 +138,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
     return filtered.sort((a, b) =>
       (nextStep(a)?.dueAt ?? '').localeCompare(nextStep(b)?.dueAt ?? ''),
     )
-  }, [inFlight, supervisorMode, canViewEmployee, employeeId, typeFilter, search])
+  }, [inFlight, employeeId, typeFilter, search])
 
   const myQueueItems = usePaged(myQueue, 8)
 
@@ -129,6 +152,10 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
 
   const overdue = inFlight.filter((r) => (nextStep(r)?.dueAt ?? '9999-99-99') < TODAY).length
   const decided = requests.filter((r) => r.steps.some((s) => s.actedAt)).length
+  const annualBalance = approveTarget ? balanceFor(approveTarget.request.employeeId, annualTypeId) : null
+  const proposedDays = approveTarget && approveReturnDate
+    ? dayCount(approveTarget.request.startDate, approveReturnDate)
+    : 0
 
   const doDecide = (r: LeaveRequest, decision: 'approved' | 'rejected' | 'returned', endDate?: string, comment?: string, sig?: { path?: string | null; hash?: string | null }) => {
     const step = nextStep(r)
@@ -148,7 +175,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
     }
     items.push({ icon: Eye, label: 'View full details', onClick: () => setDetail(r) })
     if (canAct(r) && nextStep(r)) {
-      items.push({ icon: Check, label: 'Approve', onClick: () => { const step = nextStep(r)!; setApproveTarget({ request: r, stepOrder: step.order }); setApproveReturnDate(r.startDate >= TODAY ? r.startDate : TODAY); setApproveComment(''); setSignatureStep('pending'); setSignatureData({ path: null, hash: null }) } })
+      items.push({ icon: Check, label: 'Approve', onClick: () => { const step = nextStep(r)!; setApproveTarget({ request: r, stepOrder: step.order, isFinalStep: isFinalStep(r) }); setApproveReturnDate(r.startDate >= TODAY ? r.startDate : TODAY); setApproveComment(''); setSignatureStep('pending'); setSignatureData({ path: null, hash: null }) } })
       items.push({ icon: RotateCcw, label: 'Return for correction', onClick: () => doDecide(r, 'returned') })
       items.push({ icon: X, label: 'Reject', tone: 'danger', onClick: () => doDecide(r, 'rejected') })
     }
@@ -168,7 +195,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <StatCard icon={ListChecks} label="Awaiting my decision" value={myQueue.length} hint={supervisorMode ? 'All office steps' : 'Assigned to you'} tone="amber" />
+        <StatCard icon={ListChecks} label="Awaiting my decision" value={myQueue.length} hint="Assigned to you" tone="amber" />
         <StatCard icon={Timer} label="SLA overdue" value={overdue} hint="Escalating to next authority" tone="rose" />
         <StatCard icon={ShieldCheck} label="Steps acted so far" value={decided} hint="Across current requests" tone="teal" />
         <StatCard icon={Check} label="Deciding as" value={employee.name.split(' ')[0]} hint={supervisorMode ? `${employee.title} · supervisor mode` : employee.title} tone="emerald" />
@@ -185,7 +212,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
 
       {tab === 'queue' && (
       <Panel
-        title={supervisorMode ? 'All pending actions' : 'Your approval queue'}
+        title="Your approval queue"
         subtitle={`${myQueue.length} action${myQueue.length === 1 ? '' : 's'} awaiting a decision`}
       >
         <TableToolbar
@@ -388,7 +415,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
         open={approveTarget !== null}
         onClose={() => { setApproveTarget(null); setSignatureStep('pending'); setSignatureData({ path: null, hash: null }) }}
         title={approveTarget ? `Approve ${approveTarget.request.ref}` : 'Approve request'}
-        subtitle="Grant the leave and set the return date — this fixes the number of days and records your decision."
+        subtitle={approveTarget?.isFinalStep ? 'Final approver sets the return date and granted leave duration.' : 'Record your decision. The final approver will set the return date and duration.'}
         size="md"
       >
         {approveTarget && (
@@ -419,16 +446,42 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                   </p>
                   <p className="text-[11px] text-muted-foreground mt-0.5">{approveTarget.request.reason || 'No reason given.'}</p>
                 </div>
-                <TextInput
-                  type="date"
-                  label="Return to work date"
-                  hint="The day the employee resumes duty; leave days are counted up to the day before."
-                  value={approveReturnDate}
-                  onChange={(e) => setApproveReturnDate(e.target.value)}
-                />
-                <p className="text-[12px] font-mono text-foreground">
-                  {approveReturnDate ? `≈ ${fmtShort(approveTarget.request.startDate)} → ${fmtShort(approveReturnDate)} · ${dayCount(approveTarget.request.startDate, approveReturnDate)} day${dayCount(approveTarget.request.startDate, approveReturnDate) === 1 ? '' : 's'}` : 'Set the return date to grant leave.'}
-                </p>
+                {approveTarget.isFinalStep ? (
+                  <>
+                    <TextInput
+                      type="date"
+                      label="Return to work date"
+                      hint="The day the employee resumes duty; leave days are counted up to the day before."
+                      value={approveReturnDate}
+                      onChange={(e) => setApproveReturnDate(e.target.value)}
+                    />
+                    <p className="text-[12px] font-mono text-foreground">
+                      {approveReturnDate ? `≈ ${fmtShort(approveTarget.request.startDate)} → ${fmtShort(approveReturnDate)} · ${proposedDays} day${proposedDays === 1 ? '' : 's'}` : 'Set the return date to grant leave.'}
+                    </p>
+                  </>
+                ) : (
+                  <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12px] text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200">
+                    This is an intermediate approval step. The return date and granted days are reserved for the final approver.
+                  </p>
+                )}
+                {(approvalInsight?.annual_balance ?? annualBalance) && (
+                  <div className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-[12px] text-teal-900 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-200">
+                    Shared annual balance: {(approvalInsight?.annual_balance ?? annualBalance)!.remaining} days
+                    {approveTarget.isFinalStep
+                      ? ` before this request; approximately ${Math.max(0, (approvalInsight?.annual_balance ?? annualBalance)!.remaining - proposedDays)} after approval.`
+                      : '.'}{' '}
+                    Approved days from all leave types count in this service year.
+                  </div>
+                )}
+                {approveTarget.isFinalStep && approveTarget.request.leaveTypeId === annualTypeId && (
+                  <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12px] text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200">
+                    {approvalInsightLoading
+                      ? 'Checking the employee’s annual payment cycle…'
+                      : approvalInsight?.annual_request_number
+                        ? `This is annual leave request #${approvalInsight.annual_request_number} in the employee’s service year. ${approvalInsight.payment_eligible ? 'It is eligible for HR payment review after approval.' : 'It is not eligible for payment review in the every-second-request cycle.'}`
+                        : 'Payment-cycle insight is unavailable; HR can check eligibility after approval.'}
+                  </div>
+                )}
                 <TextArea
                   label="Decision comment (recorded)"
                   value={approveComment}
@@ -443,10 +496,10 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
               <div className="flex items-center gap-2">
                 <Btn
                   variant="emerald"
-                  disabled={!approveReturnDate}
+                  disabled={approveTarget?.isFinalStep === true && !approveReturnDate}
                   onClick={() => {
                     if (!approveTarget) return
-                    doDecide(approveTarget.request, 'approved', approveReturnDate, approveComment.trim() || undefined, signatureData)
+                    doDecide(approveTarget.request, 'approved', approveTarget.isFinalStep ? approveReturnDate : undefined, approveComment.trim() || undefined, signatureData)
                     setSignatureStep('pending')
                     setSignatureData({ path: null, hash: null })
                     setApproveTarget(null)

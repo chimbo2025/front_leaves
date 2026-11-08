@@ -39,7 +39,7 @@ import {
   ROLE_PERMISSION_ACTIONS,
   ROLE_PERMISSION_CODE_META,
 } from '@/components/leave/leave-context'
-import { leaveApi, type PositionDto, type DivisionDto, type UnitDto } from '@/lib/leave-api'
+import { getPermissionAudit, leaveApi, type PermissionAuditReport, type PositionDto, type DivisionDto, type UnitDto } from '@/lib/leave-api'
 import {
   SectionHeading,
   Panel,
@@ -167,8 +167,29 @@ export function SettingsView() {
   }
 
   const [permTab, setPermTab] = useState('matrix')
+  const [permissionAudit, setPermissionAudit] = useState<PermissionAuditReport | null>(null)
+  const [permissionAuditLoading, setPermissionAuditLoading] = useState(false)
+  const [permissionAuditError, setPermissionAuditError] = useState('')
+  const [permissionAuditRefresh, setPermissionAuditRefresh] = useState(0)
+
+  useEffect(() => {
+    if (tab !== 'permissions' || permTab !== 'audit' || !can('admin', 'view')) return
+    let cancelled = false
+    setPermissionAuditLoading(true)
+    setPermissionAuditError('')
+    getPermissionAudit()
+      .then((res) => { if (!cancelled) setPermissionAudit(res.data) })
+      .catch((error: unknown) => { if (!cancelled) setPermissionAuditError(error instanceof Error ? error.message : 'Permission audit could not be loaded.') })
+      .finally(() => { if (!cancelled) setPermissionAuditLoading(false) })
+    return () => { cancelled = true }
+  }, [tab, permTab, permissionAuditRefresh, can])
 
   const [zoneFilter, setZoneFilter] = useState('all')
+  const [departmentFilter, setDepartmentFilter] = useState('all')
+  const [divisionFilter, setDivisionFilter] = useState('all')
+  const [unitFilter, setUnitFilter] = useState('all')
+  const [positionFilter, setPositionFilter] = useState('all')
+  const [roleFilter, setRoleFilter] = useState('all')
   const [staffSearch, setStaffSearch] = useState('')
   const [activeFilter, setActiveFilter] = useState('all')
   const [viewTarget, setViewTarget] = useState<EmployeeRow | null>(null)
@@ -305,6 +326,14 @@ export function SettingsView() {
   const staff = employees.filter((e) => {
     if (zoneFilter !== 'all' && e.zoneId !== zoneFilter) return false
     if (zoneFilter === 'all' && scopeZone !== 'all' && e.zoneId !== scopeZone) return false
+    if (departmentFilter !== 'all' && e.departmentId !== departmentFilter) return false
+    if (divisionFilter !== 'all' && e.divisionId !== divisionFilter) return false
+    if (unitFilter !== 'all' && e.unitId !== unitFilter) return false
+    if (positionFilter !== 'all' && e.positionId !== positionFilter) return false
+    if (roleFilter !== 'all') {
+      const held = [...(e.roleIds ?? []), ...(rolesOf(e.id) ?? []), ...(customRoleAssignments[e.id] ?? [])]
+      if (!held.includes(roleFilter)) return false
+    }
     if (activeFilter === 'active' && !e.active) return false
     if (activeFilter === 'inactive' && e.active) return false
     const q = staffSearch.trim().toLowerCase()
@@ -572,6 +601,51 @@ export function SettingsView() {
                 value: zoneFilter,
                 onChange: setZoneFilter,
                 options: [{ value: 'all', label: scopeZone === 'all' ? 'All zones' : getZone(scopeZone).name }, ...(scopeZone === 'all' ? allZones.map((z) => ({ value: z.id, label: z.name })) : [])],
+              },
+              {
+                label: 'Department',
+                value: departmentFilter,
+                onChange: (value) => { setDepartmentFilter(value); setDivisionFilter('all'); setUnitFilter('all') },
+                options: [
+                  { value: 'all', label: 'All departments' },
+                  ...allDepts.filter((d) => d.isActive !== false && !['division', 'unit', 'independent_unit'].includes(d.unitType ?? '')).map((d) => ({ value: d.id, label: d.name })),
+                ],
+              },
+              {
+                label: 'Division',
+                value: divisionFilter,
+                onChange: setDivisionFilter,
+                options: [
+                  { value: 'all', label: 'All divisions' },
+                  ...allDepts.filter((d) => d.isActive !== false && d.unitType === 'division' && (departmentFilter === 'all' || d.parentId === departmentFilter)).map((d) => ({ value: d.id, label: d.name })),
+                ],
+              },
+              {
+                label: 'Unit',
+                value: unitFilter,
+                onChange: setUnitFilter,
+                options: [
+                  { value: 'all', label: 'All units' },
+                  ...allDepts.filter((d) => d.isActive !== false && ['unit', 'independent_unit'].includes(d.unitType ?? '')).map((d) => ({ value: d.id, label: d.name })),
+                ],
+              },
+              {
+                label: 'Position',
+                value: positionFilter,
+                onChange: setPositionFilter,
+                options: [
+                  { value: 'all', label: 'All positions' },
+                  ...positionOptions.map((p) => ({ value: p.id, label: p.title })),
+                ],
+              },
+              {
+                label: 'Role',
+                value: roleFilter,
+                onChange: setRoleFilter,
+                options: [
+                  { value: 'all', label: 'All roles' },
+                  ...allRoleIds.map((id) => ({ value: id, label: roleName(id) })),
+                ],
               },
               {
                 label: 'Activity',
@@ -866,12 +940,16 @@ export function SettingsView() {
           {orgTab === 'separation' && (
             <Panel title="Regional data separation" subtitle="Least-privilege access control">
               <div className="space-y-2.5">
-                {['Pemba office', 'Unguja North office', 'Unguja HQ'].map((r) => (
-                  <div key={r} className="flex items-center gap-2.5 rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2.5">
+                {allZones.map((z) => (
+                  <div key={z.id} className="flex items-center gap-2.5 rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2.5">
                     <Lock className="w-4 h-4 text-teal-700" />
                     <div className="flex-1">
-                      <p className="text-[12px] font-semibold text-foreground">{r}</p>
-                      <p className="text-[10px] text-muted-foreground">Can only view staff and requests in this zone</p>
+                      <p className="text-[12px] font-semibold text-foreground">{z.name}</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {z.isHQ
+                          ? 'Central oversight for every zone (DPP, HR Director, Deputy)'
+                          : 'Can only view staff and requests in this zone'}
+                      </p>
                     </div>
                     <ShieldCheck className="w-4 h-4 text-emerald-500" />
                   </div>
@@ -970,6 +1048,7 @@ export function SettingsView() {
               { value: 'matrix', label: 'Permission matrix', icon: Grid3x3Icon },
               { value: 'scopes', label: 'Approval roles & scopes', icon: ShieldCheck, badge: Object.keys(rolePermissions).length },
               { value: 'codes', label: 'Granular access codes', icon: KeyRound },
+              { value: 'audit', label: 'Permission audit', icon: ShieldCheck },
               { value: 'held', label: 'Held by', icon: UserCog },
             ]}
             value={permTab}
@@ -1272,6 +1351,62 @@ export function SettingsView() {
               <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
                 Example — remove <span className="font-mono">view_medical_documents</span> from HR and restricted medical records disappear from the documents view instantly.
               </p>
+            </Panel>
+          )}
+
+          {permTab === 'audit' && (
+            <Panel
+              title="Live permission enforcement audit"
+              subtitle="Read-only check of catalog status, role grants, holders, workflow roles and known configuration anomalies."
+              actions={<Btn variant="outline" onClick={() => setPermissionAuditRefresh((value) => value + 1)} disabled={permissionAuditLoading}>Refresh audit</Btn>}
+            >
+              {permissionAuditLoading ? (
+                <p className="text-sm text-muted-foreground">Checking the live permission catalog…</p>
+              ) : permissionAuditError ? (
+                <p role="alert" className="text-sm text-rose-700 dark:text-rose-300">{permissionAuditError}</p>
+              ) : permissionAudit ? (
+                <div className="space-y-5">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {Object.entries(permissionAudit.summary).map(([key, value]) => (
+                      <div key={key} className="rounded-xl border border-border bg-warm dark:bg-muted/30 p-3">
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{key.replaceAll('_', ' ')}</p>
+                        <p className="text-lg font-semibold text-foreground">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold mb-2">Anomalies ({permissionAudit.anomalies.length})</h3>
+                    {permissionAudit.anomalies.length ? (
+                      <div className="space-y-2">
+                        {permissionAudit.anomalies.map((item, i) => (
+                          <div key={`${item.code}-${item.entity_id ?? i}`} className={cn('rounded-lg border px-3 py-2 text-xs', item.severity === 'critical' ? 'border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200' : item.severity === 'warning' ? 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200' : 'border-border bg-warm text-muted-foreground')}>
+                            <span className="font-semibold uppercase">{item.severity}</span> · {item.message}
+                          </div>
+                        ))}
+                      </div>
+                    ) : <p className="text-xs text-emerald-700 dark:text-emerald-300">No permission configuration anomalies were found.</p>}
+                  </div>
+                  <div className="overflow-x-auto">
+                    <h3 className="text-sm font-semibold mb-2">Permission codes and enforcement references</h3>
+                    <table className="w-full text-left text-xs min-w-[760px]">
+                      <thead><tr className="border-b border-border text-muted-foreground"><th className="py-2 pr-3">Code</th><th className="py-2 pr-3">Status</th><th className="py-2 pr-3">Grantable</th><th className="py-2 pr-3">Roles</th><th className="py-2 pr-3">Holders</th><th className="py-2">Enforcement</th></tr></thead>
+                      <tbody>
+                        {permissionAudit.permissions.map((item) => (
+                          <tr key={item.code} className="border-b border-border/60 align-top">
+                            <td className="py-2 pr-3 font-mono">{item.code}</td>
+                            <td className="py-2 pr-3">{item.status}{item.active ? '' : ' · inactive'}</td>
+                            <td className="py-2 pr-3">{item.is_grantable ? 'Yes' : 'No'}</td>
+                            <td className="py-2 pr-3">{item.roles_count}</td>
+                            <td className="py-2 pr-3">{item.holders_count}</td>
+                            <td className="py-2 break-all text-muted-foreground">{item.enforcement_reference || 'No reference'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">Generated {new Date(permissionAudit.generated_at).toLocaleString()}</p>
+                </div>
+              ) : <p className="text-sm text-muted-foreground">Select Refresh audit to load current database state.</p>}
             </Panel>
           )}
 
