@@ -4,6 +4,7 @@ import * as React from 'react'
 import { createPortal } from 'react-dom'
 import { X, Search, MoreHorizontal, ChevronLeft, ChevronRight, ChevronDown, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { resolveAvatar } from '@/lib/avatar'
 import {
   getEmployee,
   getLeaveType,
@@ -31,32 +32,98 @@ export function StatusPill({ status, className }: { status: Status; className?: 
   )
 }
 
+/**
+ * Circular employee avatar.
+ *
+ * Accepts an employee id (resolved from the hydrated roster), or explicit
+ * name/initials/photo props for rows that are not in the roster yet (a
+ * just-registered employee, an API-only report row, a notification actor).
+ *
+ * Rendering order: profile photo → initials → placeholder. Initials are the
+ * first letter of the first name plus the first letter of the last name,
+ * uppercase, never more than two characters.
+ */
 export function Avatar({
   id,
+  name,
+  initials,
+  photoUrl,
   className,
   size = 'md',
+  ariaLabel,
+  title,
 }: {
-  id: string
+  id?: string
+  name?: string | null
+  initials?: string | null
+  photoUrl?: string | null
   className?: string
-  size?: 'sm' | 'md' | 'lg'
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl'
+  ariaLabel?: string
+  title?: string
 }) {
-  const emp = getEmployee(id)
+  const emp = id ? getEmployee(id) : undefined
+  // A broken image (deleted file, unreachable CDN) falls back to initials
+  // instead of leaving a blank circle.
+  const [photoFailed, setPhotoFailed] = React.useState(false)
+
+  const resolvedPhoto = photoFailed ? null : (photoUrl ?? emp?.photoUrl ?? null)
+
+  React.useEffect(() => {
+    setPhotoFailed(false)
+  }, [photoUrl, emp?.photoUrl, id])
+
+  const resolved = resolveAvatar({
+    name: name ?? emp?.name,
+    initials: initials ?? emp?.avatarInitials ?? emp?.initials,
+    photoUrl: resolvedPhoto,
+  })
+
+  const sizes = {
+    xs: 'h-5 w-5 text-[9px]',
+    sm: 'h-6 w-6 text-[10px]',
+    md: 'h-8 w-8 text-xs',
+    lg: 'h-10 w-10 text-sm',
+    xl: 'h-14 w-14 text-lg',
+  }
   const gradient = emp?.gradient ?? 'from-teal-600 to-cyan-600'
-  const text = emp?.initials ?? (id.replace(/^[a-zA-Z]*(\d+)/, '') || '?')
-  const sizes = { sm: 'h-6 w-6 text-[10px]', md: 'h-8 w-8 text-xs', lg: 'h-10 w-10 text-sm' }
+  const label =
+    ariaLabel ??
+    (resolved.kind === 'photo'
+      ? `Profile photo${name ?? emp?.name ? ` of ${name ?? emp?.name}` : ''}`
+      : `Avatar ${resolved.value}${name ?? emp?.name ? ` — ${name ?? emp?.name}` : ''}`)
+
   return (
-    <div
+    <span
+      role="img"
+      aria-label={label}
+      title={title ?? name ?? emp?.name}
       className={cn(
-        'rounded-full bg-gradient-to-br text-white grid place-items-center font-semibold flex-shrink-0',
+        'relative inline-grid place-items-center overflow-hidden rounded-full bg-gradient-to-br font-semibold text-white flex-shrink-0 select-none',
         gradient,
         sizes[size],
         className,
       )}
     >
-      {text}
-    </div>
+      {resolved.kind === 'photo' ? (
+        <img
+          src={resolved.value}
+          alt=""
+          aria-hidden="true"
+          className="h-full w-full object-cover"
+          onError={() => setPhotoFailed(true)}
+        />
+      ) : (
+        <span aria-hidden="true" className="leading-none tracking-tight">
+          {resolved.value}
+        </span>
+      )}
+    </span>
   )
 }
+
+/** Explicitly-named alias for call sites that read better as "initials avatar". */
+export const InitialsAvatar = Avatar
 
 export function TypePill({ leaveTypeId, showName }: { leaveTypeId: string; showName?: boolean }) {
   const lt = getLeaveType(leaveTypeId)
@@ -216,6 +283,8 @@ export function MultiSelect({
   onChange,
   placeholder = 'Select…',
   disabled,
+  searchable,
+  searchPlaceholder = 'Search…',
 }: {
   label?: string
   hint?: string
@@ -224,9 +293,17 @@ export function MultiSelect({
   onChange: (next: string[]) => void
   placeholder?: string
   disabled?: boolean
+  /** Adds a search box pinned at the top of the dropdown plus Select shown / Clear shown actions. */
+  searchable?: boolean
+  searchPlaceholder?: string
 }) {
   const [open, setOpen] = React.useState(false)
+  const [query, setQuery] = React.useState('')
   const rootRef = React.useRef<HTMLDivElement>(null)
+
+  React.useEffect(() => {
+    if (!open) setQuery('')
+  }, [open])
 
   React.useEffect(() => {
     if (!open) return
@@ -245,10 +322,26 @@ export function MultiSelect({
   const selected = new Set(value)
   const chosen = options.filter((o) => selected.has(o.value))
 
+  const needle = query.trim().toLowerCase()
+  const shown = needle === ''
+    ? options
+    : options.filter((o) => o.label.toLowerCase().includes(needle))
+  const allShownSelected = shown.length > 0 && shown.every((o) => selected.has(o.value))
+
   const toggle = (v: string) => {
     const next = new Set(value)
     if (next.has(v)) next.delete(v)
     else next.add(v)
+    onChange([...next])
+  }
+
+  const toggleShown = () => {
+    const next = new Set(value)
+    if (allShownSelected) {
+      shown.forEach((o) => next.delete(o.value))
+    } else {
+      shown.forEach((o) => next.add(o.value))
+    }
     onChange([...next])
   }
 
@@ -280,10 +373,55 @@ export function MultiSelect({
       </button>
       {open && (
         <div className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-xl border border-border bg-popover p-1 shadow-lg">
-          {options.length === 0 ? (
-            <p className="px-2 py-1.5 text-[12px] text-muted-foreground">No options available.</p>
+          {searchable && (
+            <div className="sticky top-0 z-10 border-b border-border bg-popover p-1">
+              <input
+                autoFocus
+                type="text"
+                value={query}
+                placeholder={searchPlaceholder}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') setOpen(false)
+                  e.stopPropagation()
+                }}
+                className="h-8 w-full rounded-lg border border-input bg-background px-2 text-[12px] outline-none focus:border-teal-600"
+              />
+            </div>
+          )}
+          {searchable && shown.length > 0 && (
+            <div className="flex items-center justify-between px-2 py-1">
+              <span className="text-[10px] text-muted-foreground">
+                {shown.length === options.length
+                  ? `${chosen.length} selected`
+                  : `${shown.length} of ${options.length} shown · ${chosen.length} selected`}
+              </span>
+              <div className="flex gap-2 text-[10px] font-semibold">
+                <button
+                  type="button"
+                  onClick={toggleShown}
+                  className="text-teal-700 hover:underline dark:text-teal-300"
+                >
+                  {allShownSelected ? 'Clear shown' : 'Select shown'}
+                </button>
+                {chosen.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onChange([])}
+                    className="text-muted-foreground hover:underline"
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+          {shown.length === 0 ? (
+            <p className="px-2 py-1.5 text-[12px] text-muted-foreground">
+              {needle === '' ? 'No options available.' : `No matches for “${query}”.`}
+            </p>
           ) : (
-            options.map((o) => {
+            shown.map((o) => {
               const on = selected.has(o.value)
               return (
                 <button

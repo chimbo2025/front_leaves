@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth'
 import { useLeave } from '@/components/leave/leave-context'
 import { ThemeToggle } from '@/components/leave/theme-toggle'
+import { Avatar } from '@/components/leave/shared'
 
 interface HeaderProps {
   onNavigate: (view: string) => void
@@ -43,9 +44,13 @@ export function LeaveHeader({ onNavigate }: HeaderProps) {
             className="md:hidden inline-flex items-center gap-1 rounded-full border border-border bg-card px-2 py-1.5 text-[12px] font-medium text-foreground hover:bg-accent transition"
             aria-label="My profile"
           >
-            <span className="w-6 h-6 rounded-full bg-gradient-to-br from-teal-600 to-cyan-600 grid place-items-center text-white text-[10px]">
-              {employee.initials}
-            </span>
+            <Avatar
+              id={employee.id}
+              name={employee.name}
+              initials={employee.avatarInitials ?? employee.initials}
+              photoUrl={employee.photoUrl}
+              size="sm"
+            />
             <ChevronDown className="w-3 h-3 text-muted-foreground" />
           </button>
 
@@ -68,11 +73,18 @@ export function LeaveHeader({ onNavigate }: HeaderProps) {
           <button
             type="button"
             onClick={goProfile}
-            className="hidden sm:grid h-9 w-9 rounded-full bg-gradient-to-br from-teal-600 to-cyan-600 place-items-center text-white text-[13px] font-semibold shadow-sm shadow-teal-700/20 hover:ring-2 hover:ring-teal-600/40 transition"
-            aria-label="My profile"
+            className="hidden sm:inline-flex h-9 w-9 items-center justify-center rounded-full hover:ring-2 hover:ring-teal-600/40 transition"
+            aria-label={`My profile — ${employee.name}`}
             title="My profile"
           >
-            {employee.initials}
+            <Avatar
+              id={employee.id}
+              name={employee.name}
+              initials={employee.avatarInitials ?? employee.initials}
+              photoUrl={employee.photoUrl}
+              size="md"
+              className="h-9 w-9 text-[13px] shadow-sm shadow-teal-700/20"
+            />
           </button>
 
           <button

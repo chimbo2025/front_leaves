@@ -24,6 +24,7 @@ import {
   ChevronDown,
   ChevronRight,
 } from 'lucide-react'
+import { initialsFromName } from '@/lib/avatar'
 import { cn } from '@/lib/utils'
 import {
   roleLabels,
@@ -60,18 +61,15 @@ import {
   type RowMenuItem,
 } from '@/components/leave/shared'
 
-function RowAvatar({ e, size = 'sm' }: { e: EmployeeRow; size?: 'sm' | 'md' | 'lg' }) {
-  const sizes = { sm: 'h-6 w-6 text-[10px]', md: 'h-8 w-8 text-xs', lg: 'h-10 w-10 text-sm' }
+function RowAvatar({ e, size = 'sm' }: { e: EmployeeRow; size?: 'sm' | 'md' | 'lg' | 'xl' }) {
   return (
-    <div
-      className={cn(
-        'rounded-full bg-gradient-to-br text-white grid place-items-center font-semibold flex-shrink-0',
-        e.gradient,
-        sizes[size],
-      )}
-    >
-      {e.initials}
-    </div>
+    <Avatar
+      id={e.id}
+      name={e.name}
+      initials={e.avatarInitials ?? e.initials}
+      photoUrl={e.photoUrl}
+      size={size}
+    />
   )
 }
 
@@ -241,6 +239,8 @@ export function SettingsView() {
   const [roleDelete, setRoleDelete] = useState<string | null>(null)
   const [regOpen, setRegOpen] = useState(false)
   const [regBusy, setRegBusy] = useState(false)
+  /** Holds the row returned by registration so its avatar is visible right away. */
+  const [registeredEmployee, setRegisteredEmployee] = useState<EmployeeRow | null>(null)
   const [regDraft, setRegDraft] = useState({
     full_name: '',
     payroll_no: '',
@@ -549,6 +549,9 @@ export function SettingsView() {
       setRegBusy(false)
       if (created) {
         setRegOpen(false)
+        // Show the new person (with their initials avatar) immediately, before
+        // the staff list reload finishes.
+        setRegisteredEmployee(created)
         seedRegDraft()
       }
     })
@@ -578,6 +581,31 @@ export function SettingsView() {
         value={tab}
         onChange={setTab}
       />
+
+      {registeredEmployee && (
+        <div
+          className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3 dark:border-emerald-900 dark:bg-emerald-950/40"
+          role="status"
+        >
+          <RowAvatar e={registeredEmployee} size="lg" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[12px] font-semibold text-emerald-900 dark:text-emerald-100">
+              {registeredEmployee.name} registered — initials avatar is live.
+            </p>
+            <p className="text-[11px] text-emerald-800/80 dark:text-emerald-200/70">
+              The staff directory below already shows the avatar; no reload required.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setRegisteredEmployee(null)}
+            aria-label="Dismiss"
+            className="text-emerald-800/70 hover:text-emerald-900 dark:text-emerald-200/70 dark:hover:text-emerald-100"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {tab === 'staff' && (
         <Panel
@@ -1500,6 +1528,16 @@ export function SettingsView() {
         }
       >
         <div className="space-y-4">
+          {/* Live preview of the initials avatar the new employee will get. */}
+          <div className="flex items-center gap-3 rounded-lg border border-border bg-secondary/40 px-3 py-2">
+            <Avatar name={regDraft.full_name} size="lg" ariaLabel="Initials preview" />
+            <div className="min-w-0">
+              <p className="text-[12px] font-semibold text-foreground truncate">{regDraft.full_name.trim() || 'New employee'}</p>
+              <p className="text-[10px] text-muted-foreground">
+                Initials avatar, updates as you type{regDraft.full_name.trim() ? ` — ${initialsFromName(regDraft.full_name)}` : ''}
+              </p>
+            </div>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             <TextInput label="Full name" value={regDraft.full_name} onChange={(e) => setRegDraft({ ...regDraft, full_name: e.target.value })} placeholder="e.g. Amina Yusuf Mwinyi" />
             <TextInput label="Payroll no." value={regDraft.payroll_no} onChange={(e) => setRegDraft({ ...regDraft, payroll_no: e.target.value })} placeholder="DPP-1013" />

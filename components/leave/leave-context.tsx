@@ -33,6 +33,7 @@ import {
   type HandoverRecord,
   type Document,
 } from '@/lib/leave'
+import { initialsFromName } from '@/lib/avatar'
 import {
   leaveApi,
   ApiError,
@@ -101,6 +102,9 @@ export type EmployeeRow = Employee & {
 
 export interface RegisterEmployeeInput {
   full_name: string
+  first_name?: string | null
+  middle_name?: string | null
+  last_name?: string | null
   initials?: string
   payrollNo?: string | null
   position_id: string | null
@@ -240,6 +244,8 @@ interface LeaveContextValue {
    */
   annualTypeId: string
   workflowDefs: WorkflowDef[]
+  /** Re-fetch the unpaginated definition list (coverage stats / routing tips). */
+  refreshWorkflows: () => Promise<void>
   rolePermissions: Record<string, Record<string, string[]>>
   roleNames: Record<string, string>
   /** Backend `roles.description` per role id — the scopes tab renders these. */
@@ -286,7 +292,7 @@ interface LeaveContextValue {
   /** Permanent staff removal — API refuses anyone with history (422 toast). */
   deleteEmployee: (employeeId: string, reason: string) => Promise<boolean>
   forceDeleteRequest: (requestId: string, reason: string) => Promise<boolean>
-  registerEmployee: (input: RegisterEmployeeInput) => Promise<Employee | null>
+  registerEmployee: (input: RegisterEmployeeInput) => Promise<EmployeeRow | null>
   createLeaveType: (input: CreateLeaveTypeInput) => void
   updateLeaveType: (leaveTypeId: string, patch: Partial<Pick<LeaveType, 'name' | 'swahili' | 'short' | 'description' | 'color' | 'paid'>>) => void
   deleteLeaveType: (leaveTypeId: string) => Promise<boolean>
@@ -462,6 +468,9 @@ const GRADIENTS = [
 
 function employeeRow(j: EmployeeDto): EmployeeRow {
   const hash = j.id.split('').reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 3)
+  // The API sends the derived initials; the local fallback keeps an optimistic
+  // row (registration response, cached payload) from rendering an empty circle.
+  const avatarInitials = j.avatar_initials || j.initials || initialsFromName(j.full_name)
   return {
     id: j.id,
     userId: j.user_id ?? '',
@@ -469,7 +478,9 @@ function employeeRow(j: EmployeeDto): EmployeeRow {
     payrollNo: j.payroll_no ?? '',
     name: j.full_name,
     title: j.position?.title ?? (j.position_id ? j.position_id : 'No position assigned'),
-    initials: j.initials,
+    initials: avatarInitials,
+    avatarInitials,
+    photoUrl: j.avatar_url ?? null,
     positionId: j.position_id ?? '',
     departmentId: j.department_id ?? '',
     divisionId: j.division_id ?? undefined,
@@ -560,21 +571,60 @@ function toPolicy(p: PolicyCompactDto): LeavePolicy {
   }
 }
 
+const LEGACY_ROLE_BY_APPROVAL_ROLE: Record<string, ApproverRole> = {
+  supervisor: 'SUPERVISOR',
+  department_head: 'DEPT_HEAD',
+  zonal_head: 'ZONAL_HEAD',
+  hr_reviewer: 'HR',
+  final_authority: 'FINAL_AUTHORITY',
+  accounting_reviewer: 'FINAL_AUTHORITY',
+}
+
+const APPROVAL_ROLE_BY_LEGACY: Record<ApproverRole, string> = {
+  SUPERVISOR: 'supervisor',
+  DEPT_HEAD: 'department_head',
+  ZONAL_HEAD: 'zonal_head',
+  HR: 'hr_reviewer',
+  FINAL_AUTHORITY: 'final_authority',
+}
+
 function toWorkflowDef(w: WorkflowDefDto): WorkflowDef {
   return {
     id: w.id,
+    workflowTitle: w.workflow_title,
     leaveTypeId: w.leave_type_id,
     isActive: w.is_active ?? true,
     version: w.version,
     minDurationDays: w.min_duration_days,
+    maxDurationDays: w.max_duration_days ?? null,
     zoneId: w.zone_id,
     departmentId: w.department_id,
     effectiveFrom: w.effective_from,
     effectiveTo: w.effective_to,
+    scopeKind: w.scope_kind,
+    scopeLabel: w.scope_label,
+    appliesTo: w.applies_to,
+    durationLabel: w.duration_label,
+    leaveTypeName: w.leave_type_name ?? w.leave_type?.name,
+    createdAt: w.created_at ?? null,
+    updatedAt: w.updated_at ?? null,
     steps: (w.steps ?? []).map((s) => ({
-      role: (s.role_required as ApproverRole) ?? 'SUPERVISOR',
+      // Legacy display twin. Routing still reads approvalRoleId (the catalog
+      // id); this only keeps role-based labels/statistics working for chains
+      // built before the catalog existed and for catalog-only roles.
+      role:
+        (s.role_required as ApproverRole) ??
+        LEGACY_ROLE_BY_APPROVAL_ROLE[s.approval_role?.code ?? s.approval_role_id ?? ''] ??
+        'SUPERVISOR',
       slaDays: s.sla_days,
       note: s.note ?? '',
+      approvalRoleId: s.approval_role_id ?? s.approval_role?.id,
+      fallbackApprovalRoleId: s.fallback_approval_role_id,
+      assignmentMode: s.assignment_mode,
+      scopeType: s.scope_type,
+      isMandatory: s.is_mandatory,
+      allowSamePersonAsPreviousSteps: s.allow_same_person_as_previous_steps,
+      roleName: s.approval_role?.name,
     })),
   }
 }
@@ -1271,11 +1321,16 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
     // `.name` / `.hireDate` reads never throw; when there is no profile at all
     // every field is blank rather than borrowed from a hardcoded person.
     const a = user?.employee
+    const fallbackName = a?.full_name ?? user?.username ?? '—'
+    const fallbackInitials =
+      a?.avatar_initials || a?.initials || initialsFromName(fallbackName)
     return {
       id: employeeId,
-      name: a?.full_name ?? user?.username ?? '—',
+      name: fallbackName,
       title: a?.position_id ?? 'No position assigned',
-      initials: a?.initials ?? '—',
+      initials: fallbackInitials,
+      avatarInitials: fallbackInitials,
+      photoUrl: a?.avatar_url ?? null,
       positionId: a?.position_id ?? '',
       departmentId: a?.department_id ?? '',
       zoneId: a?.zone_id ?? '',
@@ -1851,12 +1906,17 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         )
         await safe(
           leaveApi.workflows.store({
+            workflow_title: `${input.name.trim()} Workflow`,
             leave_type_id: leaveTypeId,
             steps: input.steps.length
-              ? input.steps.map((s) => ({ role_required: s.role, sla_days: s.slaDays, note: s.note }))
+              ? input.steps.map((s) => ({
+                  approval_role_id: APPROVAL_ROLE_BY_LEGACY[s.role],
+                  sla_days: s.slaDays,
+                  note: s.note,
+                }))
               : [
-                  { role_required: 'SUPERVISOR', sla_days: 2, note: 'Verifies coverage.' },
-                  { role_required: 'HR', sla_days: 3, note: 'Verifies compliance.' },
+                  { approval_role_id: 'supervisor', sla_days: 2, note: 'Verifies coverage.' },
+                  { approval_role_id: 'hr_reviewer', sla_days: 3, note: 'Verifies compliance.' },
                 ],
           }),
         )
@@ -1919,18 +1979,26 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         workflowDefs.find((w) => w.leaveTypeId === leaveTypeId && w.isActive !== false) ??
         workflowDefs.find((w) => w.leaveTypeId === leaveTypeId)
       const typeName = typeOf(leaveTypeId)?.name ?? leaveTypeId
+      const mapSteps = (rows: { role: ApproverRole; slaDays: number; note: string }[]) =>
+        rows.map((s) => ({
+          approval_role_id: APPROVAL_ROLE_BY_LEGACY[s.role],
+          sla_days: s.slaDays,
+          note: s.note,
+        }))
       void (async () => {
         if (existing) {
           await safe(
             leaveApi.workflows.update(existing.id, {
-              steps: steps.map((s) => ({ role_required: s.role, sla_days: s.slaDays, note: s.note })),
+              workflow_title: existing.workflowTitle ?? `${typeName} Workflow`,
+              steps: mapSteps(steps),
             }),
           )
         } else {
           await safe(
             leaveApi.workflows.store({
+              workflow_title: `${typeName} Workflow`,
               leave_type_id: leaveTypeId,
-              steps: steps.map((s) => ({ role_required: s.role, sla_days: s.slaDays, note: s.note })),
+              steps: mapSteps(steps),
             }),
           )
         }
@@ -1947,10 +2015,15 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       void (async () => {
         const res = await safe(
           leaveApi.workflows.store({
+            workflow_title: `${typeName} Workflow`,
             leave_type_id: input.leaveTypeId,
-            min_duration_days: input.minDurationDays ?? 0,
+            min_duration_days: Math.max(1, input.minDurationDays ?? 1),
             zone_id: input.zoneId ?? null,
-            steps: input.steps.map((s) => ({ role_required: s.role, sla_days: s.slaDays, note: s.note })),
+            steps: input.steps.map((s) => ({
+              approval_role_id: APPROVAL_ROLE_BY_LEGACY[s.role],
+              sla_days: s.slaDays,
+              note: s.note,
+            })),
           }),
         )
         if (!res) return
@@ -2036,10 +2109,13 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   )
 
   const registerEmployee = React.useCallback(
-    async (input: RegisterEmployeeInput): Promise<Employee | null> => {
+    async (input: RegisterEmployeeInput): Promise<EmployeeRow | null> => {
       const res = await safe(
         leaveApi.org.createEmployee({
           full_name: input.full_name,
+          first_name: input.first_name ?? null,
+          middle_name: input.middle_name ?? null,
+          last_name: input.last_name ?? null,
           initials: input.initials,
           payroll_no: input.payrollNo ?? null,
           position_id: input.position_id,
@@ -2488,6 +2564,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         leaveTypes,
         annualTypeId,
         workflowDefs,
+        refreshWorkflows: loadWorkflows,
         rolePermissions,
         roleNames,
         roleDescriptions,

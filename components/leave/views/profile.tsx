@@ -7,7 +7,7 @@ import { getDept, getZone } from '@/lib/leave'
 import { ApiError } from '@/lib/leave-api'
 import { useAuth } from '@/lib/auth'
 import { useLeave } from '@/components/leave/leave-context'
-import { Btn, Panel, SectionHeading, TextInput } from '@/components/leave/shared'
+import { Avatar, Btn, Panel, SectionHeading, TextInput } from '@/components/leave/shared'
 
 function DetailCell({ label, value }: { label: string; value: string }) {
   return (
@@ -76,9 +76,14 @@ export function ProfileView() {
       />
 
       <div className="flex items-center gap-4 rounded-xl border border-border bg-secondary/40 p-4">
-        <div className="h-14 w-14 rounded-full bg-gradient-to-br from-teal-600 to-cyan-600 grid place-items-center text-white text-[18px] font-bold flex-shrink-0">
-          {employee.initials}
-        </div>
+        <Avatar
+          id={employee.id}
+          name={employee.name}
+          initials={employee.avatarInitials ?? employee.initials}
+          photoUrl={employee.photoUrl}
+          size="xl"
+          ariaLabel={`Your avatar — ${employee.name}`}
+        />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-foreground truncate">{employee.name}</p>
           <p className="text-[12px] text-muted-foreground truncate">{employee.title}</p>

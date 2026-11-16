@@ -22,7 +22,12 @@ export interface Paginated<T> {
 export interface AuthEmployee {
   id: string
   full_name: string
+  first_name?: string | null
+  middle_name?: string | null
+  last_name?: string | null
   initials: string
+  avatar_initials?: string
+  avatar_url?: string | null
   payroll_no: string | null
   gender: 'M' | 'F'
   position_id: string | null
@@ -167,7 +172,15 @@ export interface EmployeeDto {
   user_id: string | null
   payroll_no: string | null
   full_name: string
-  initials: string
+  first_name?: string | null
+  middle_name?: string | null
+  last_name?: string | null
+  initials: string | null
+  /** Server-derived two-letter initials (first + last name). */
+  avatar_initials?: string
+  /** Present only when a profile photo is on file. */
+  avatar_url?: string | null
+  profile_photo_path?: string | null
   position_id: string | null
   department_id: string | null
   division_id?: string | null
@@ -259,53 +272,143 @@ export interface TipDto {
 // ---------------------------------------------------------------------------
 // Workflows
 // ---------------------------------------------------------------------------
+export type WorkflowAssignmentMode = 'assigned_approver' | 'shared_queue'
+export type WorkflowStepScope =
+  | 'requester_department'
+  | 'requester_division'
+  | 'requester_unit'
+  | 'requester_zone'
+  | 'office_wide'
+
 export interface WorkflowStepDto {
   id: number
   workflow_def_id: string
   step_order: number
-  role_required: string
+  /** Legacy pointer kept for pre-catalog consumers; routing reads approval_role_id. */
+  role_required: string | null
+  approval_role_id: string | null
+  fallback_approval_role_id: string | null
+  assignment_mode: WorkflowAssignmentMode
+  scope_type: WorkflowStepScope
+  allow_same_person_as_previous_steps: boolean
   sla_days: number
   is_mandatory: boolean
   escalation_after_sla: boolean
   note: string | null
+  approval_role?: ApprovalRoleDto | null
 }
 
 export interface WorkflowDefDto {
   id: string
+  /** Required human label; the primary identifier in Workflow Management. */
+  workflow_title: string
   leave_type_id: string
   version: number
   min_duration_days: number
+  /** Optional upper bound for the hidden "Advanced Duration Rule". */
+  max_duration_days: number | null
   zone_id: string | null
   department_id: string | null
+  /** Multi-scope placement set (pivot rows + legacy mirror). */
+  department_ids?: string[]
   effective_from: string | null
   effective_to: string | null
   created_by: string | null
   approved_by: string | null
   notes: string | null
   is_active: boolean
+  created_at?: string | null
+  updated_at?: string | null
   leave_type: LeaveTypeDto | null
+  /** Server-computed presentation fields from WorkflowController::decorate. */
+  leave_type_name?: string | null
+  zone_name?: string | null
+  department_name?: string | null
+  department_unit_type?: string | null
+  scope_kind?: 'office_wide' | 'zone' | 'department'
+  scope_label?: string
+  applies_to?: string
+  duration_label?: string
   steps: WorkflowStepDto[]
 }
 
 export interface WorkflowStepInput {
-  role_required: string
+  /** Catalog role id — the backend derives the legacy role pointer itself. */
+  approval_role_id: string
+  fallback_approval_role_id?: string | null
+  assignment_mode?: WorkflowAssignmentMode
+  scope_type?: WorkflowStepScope
+  /** Legacy pointer; omitted by the new builder so it cannot be mistyped. */
+  role_required?: string | null
   sla_days: number
   is_mandatory?: boolean
+  allow_same_person_as_previous_steps?: boolean
   escalation_after_sla?: boolean
   note?: string | null
 }
 
 export interface WorkflowStoreInput {
   id?: string
+  workflow_title: string
   leave_type_id: string
   min_duration_days?: number
+  max_duration_days?: number | null
   zone_id?: string | null
   department_id?: string | null
+  department_ids?: string[]
   effective_from?: string
   effective_to?: string | null
   notes?: string | null
   is_active?: boolean
   steps: WorkflowStepInput[]
+}
+
+export interface WorkflowListParams {
+  page?: number
+  per_page?: number
+  search?: string
+  leave_type_id?: string
+  status?: 'active' | 'inactive' | ''
+  scope?: 'office_wide' | 'zone' | 'department' | 'division' | 'unit' | ''
+  zone_id?: string
+  department_id?: string
+  sort?: 'title' | 'leave_type' | 'version' | 'created_at' | 'updated_at' | ''
+  direction?: 'asc' | 'desc'
+}
+
+export interface WorkflowCheckInput {
+  id?: string
+  leave_type_id: string
+  workflow_title?: string
+  min_duration_days?: number
+  max_duration_days?: number | null
+  zone_id?: string | null
+  department_id?: string | null
+  department_ids?: string[]
+  effective_from?: string
+  effective_to?: string | null
+  steps?: Partial<WorkflowStepInput>[]
+}
+
+export interface WorkflowCheckStep {
+  step_order: number
+  approval_role_id: string | null
+  approval_role_name: string | null
+  assignment_mode: WorkflowAssignmentMode
+  scope_type: WorkflowStepScope
+  is_mandatory: boolean
+  note: string | null
+}
+
+export interface WorkflowCheckResult {
+  conflict: boolean
+  message: string | null
+  conflict_title: string | null
+  applies_to: string
+  duration_label: string
+  leave_type_name: string | null
+  steps: WorkflowCheckStep[]
+  final_authority: { auto: boolean; reasons: string[] }
 }
 
 // ---------------------------------------------------------------------------
@@ -316,6 +419,7 @@ export interface RequestAssignment {
   role: string
   assignee_id: string | null
   assignee_name: string | null
+  assignee_initials?: string | null
   status: 'pending' | 'queued' | 'done' | 'skipped'
   due_at: string | null
   decided_at: string | null
@@ -391,6 +495,7 @@ export interface ChainItem {
   role_label: string
   assignee_id: string | null
   assignee_name: string | null
+  assignee_initials?: string | null
   via: string
   sla_days: number
   due_at: string
@@ -652,6 +757,7 @@ export interface DetailRequestRow {
 
 export interface DetailStaffRow {
   id: string; full_name: string; initials: string | null
+  avatar_initials?: string | null
   department: { id: string; name: string } | null
   zone: { id: string; name: string; short: string } | null
   gender: string | null; hire_date: string | null
@@ -804,6 +910,10 @@ export const leaveApi = {
       request<{ data: EmployeeDto[] }>(`/org/employees${qs({ ...(params ?? {}) })}`),
     createEmployee: (body: {
       full_name: string
+      first_name?: string | null
+      middle_name?: string | null
+      last_name?: string | null
+      profile_photo_path?: string | null
       initials?: string
       payroll_no?: string | null
       position_id: string | null
@@ -967,8 +1077,31 @@ export const leaveApi = {
   },
 
   workflows: {
+    /**
+     * Unpaginated list — still `{data: [...]}` and used by the leave-context
+     * loader (coverage stats, routing tips). The Workflow Management table
+     * uses `paginate()` below.
+     */
     list: () => request<{ data: WorkflowDefDto[] }>('/workflows'),
+    paginate: (params: WorkflowListParams = {}) =>
+      request<Paginated<WorkflowDefDto>>(
+        `/workflows${qs({
+          page: params.page,
+          per_page: params.per_page,
+          search: params.search,
+          leave_type_id: params.leave_type_id,
+          status: params.status,
+          scope: params.scope,
+          zone_id: params.zone_id,
+          department_id: params.department_id,
+          sort: params.sort,
+          direction: params.direction,
+        })}`,
+      ),
     get: (id: string) => request<{ data: WorkflowDefDto }>(`/workflows/${id}`),
+    /** Dry-run for the live preview: coverage, resolved chain, overlap warning. */
+    check: (body: WorkflowCheckInput) =>
+      request<{ data: WorkflowCheckResult }>('/workflows/check', { method: 'POST', body: JSON.stringify(body) }),
     store: (body: WorkflowStoreInput) => request<{ data: WorkflowDefDto }>('/workflows', { method: 'POST', body: JSON.stringify(body) }),
     update: (id: string, body: Partial<Omit<WorkflowStoreInput, 'leave_type_id' | 'id'>>) =>
       request<{ data: WorkflowDefDto }>(`/workflows/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),

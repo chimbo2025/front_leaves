@@ -49,7 +49,12 @@ export interface Employee {
   id: string
   name: string
   title: string
+  /** Legacy stored initials (HR may customise); may be empty for new hires. */
   initials: string
+  /** Server-derived first+last initials — what avatars render. */
+  avatarInitials?: string
+  /** Profile photo URL when one is on file; avatars prefer it. */
+  photoUrl?: string | null
   positionId: string
   departmentId: string
   divisionId?: string
@@ -91,23 +96,51 @@ export interface LeavePolicy {
   effectiveTo?: string
 }
 
+export type WorkflowAssignmentMode = 'assigned_approver' | 'shared_queue'
+export type WorkflowStepScope =
+  | 'requester_department'
+  | 'requester_division'
+  | 'requester_unit'
+  | 'requester_zone'
+  | 'office_wide'
+
 export interface WorkflowStepDef {
+  /** Legacy display role. Catalog-only roles fall back to the closest twin. */
   role: ApproverRole
   slaDays: number
   note: string
+  /** Catalog role id — what the resolver actually reads. */
+  approvalRoleId?: string
+  fallbackApprovalRoleId?: string | null
+  assignmentMode?: WorkflowAssignmentMode
+  scopeType?: WorkflowStepScope
+  isMandatory?: boolean
+  allowSamePersonAsPreviousSteps?: boolean
+  /** Human label from the catalog (e.g. "HR Reviewer"). */
+  roleName?: string
 }
 
 export interface WorkflowDef {
   id: string
+  /** Required human label; primary identifier in Workflow Management. */
+  workflowTitle?: string
   leaveTypeId: string
   /** Deactivated definitions stay on file but stop routing new submissions. */
   isActive?: boolean
   version?: number
   minDurationDays?: number
+  maxDurationDays?: number | null
   zoneId?: string | null
   departmentId?: string | null
   effectiveFrom?: string | null
   effectiveTo?: string | null
+  scopeKind?: 'office_wide' | 'zone' | 'department'
+  scopeLabel?: string
+  appliesTo?: string
+  durationLabel?: string
+  leaveTypeName?: string
+  createdAt?: string | null
+  updatedAt?: string | null
   steps: WorkflowStepDef[]
 }
 

@@ -1948,7 +1948,7 @@ function ServerDetailTable(props: {
 function personCell(name: string | undefined, id: string | undefined, onOpen?: () => void) {
   return (
     <div className="flex items-center gap-2">
-      {id ? <Avatar id={id} size="sm" /> : null}
+      {id ? <Avatar id={id} name={name} size="sm" /> : null}
       {onOpen && id ? (
         <button type="button" onClick={onOpen} className="font-medium text-foreground hover:underline text-left" title="Open history">
           {name ?? id}
