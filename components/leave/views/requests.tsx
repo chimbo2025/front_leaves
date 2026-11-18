@@ -77,6 +77,7 @@ interface PartState {
   endDate: string
   reason: string
   documentName: string
+  documentFile?: File | null
   repeat: 'once' | 'weekly' | 'monthly'
   repeatCount: number
   isHalfDay: boolean
@@ -144,6 +145,7 @@ export function RequestsView() {
     endDate: addDays(TODAY, 30),
     reason: '',
     documentName: '',
+    documentFile: null,
     repeat: 'once',
     repeatCount: 2,
     isHalfDay: false,
@@ -301,6 +303,7 @@ export function RequestsView() {
       endDate: '',
       reason: occurrences.length > 1 ? `${form.reason} (occurrence ${i + 1} of ${occurrences.length}, ${form.repeat})` : form.reason,
       documentName: form.documentName || undefined,
+      documentFile: form.documentFile || undefined,
       isHalfDay: form.isHalfDay,
       emergency: form.emergency,
       emergencyReason: form.emergency ? form.emergencyReason : undefined,
@@ -316,6 +319,7 @@ export function RequestsView() {
       endDate: addDays(TODAY, 30),
       reason: '',
       documentName: '',
+      documentFile: null,
       repeat: 'once',
       repeatCount: 2,
       isHalfDay: false,
@@ -746,12 +750,12 @@ export function RequestsView() {
             <div className="flex items-center gap-2 rounded-xl border border-dashed border-input px-3 py-2.5">
               <Paperclip className="w-4 h-4 text-muted-foreground" />
               <input
-                value={form.documentName}
-                onChange={(e) => setForm({ ...form, documentName: e.target.value })}
-                placeholder={policy?.requiredDocs[0] ? `e.g. ${policy.requiredDocs[0].toLowerCase()}.pdf` : 'document file name, if any'}
-                className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                type="file"
+                onChange={(e) => setForm({ ...form, documentFile: e.target.files?.[0] ?? null })}
+                className="flex-1 bg-transparent text-sm text-foreground file:mr-2 file:rounded file:border-0 file:bg-teal-50 file:px-2 file:py-1 file:text-[12px] file:font-semibold file:text-teal-700"
               />
             </div>
+            {form.documentFile && <p className="text-[11px] text-muted-foreground mt-1">Selected: {form.documentFile.name}</p>}
           </div>
 
           <Panel

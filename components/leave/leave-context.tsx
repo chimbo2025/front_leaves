@@ -66,6 +66,7 @@ interface NewRequestInput {
   endDate: string
   reason: string
   documentName?: string
+  documentFile?: File | null
   isHalfDay?: boolean
   emergency?: boolean
   emergencyReason?: string
@@ -1505,6 +1506,14 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
           }),
         )
         if (!created) return
+        // Upload supporting document if provided
+        if (input.documentFile) {
+          try {
+            await leaveApi.requests.attachDocument(created.data.id, input.documentFile, 'supporting')
+          } catch {
+            toast.warning(`${created.data.ref ?? 'Request'} saved but document upload failed.`)
+          }
+        }
         const submitted = await safe(leaveApi.requests.submit(created.data.id))
         refreshAfterWrite()
         if (!submitted) {
