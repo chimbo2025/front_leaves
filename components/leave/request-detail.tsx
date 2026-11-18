@@ -126,6 +126,13 @@ export function RequestDetail({ request, isHr = false, actions }: { request: Lea
         </div>
       </div>
 
+      {request.isPaid !== undefined && request.isPaid !== null && (
+        <div className="rounded-xl border border-border p-3.5">
+          <p className="text-[11px] text-muted-foreground">Malipo / Payment</p>
+          <p className="text-sm font-semibold text-foreground mt-0.5">{request.isPaid ? 'Inalipwa / Paid' : 'Bila malipo / Unpaid'}</p>
+        </div>
+      )}
+
       <HandoverPanel request={request} />
 
       <div className="rounded-xl border border-border p-4">
