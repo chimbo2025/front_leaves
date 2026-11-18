@@ -255,6 +255,7 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
   // ---- Role catalog ------------------------------------------------------
   const [approvalRoles, setApprovalRoles] = useState<ApprovalRoleDto[]>([])
   const [loadingRoles, setLoadingRoles] = useState(false)
+  const [roleSearch, setRoleSearch] = useState('')
 
   useEffect(() => {
     void (async () => {
@@ -789,17 +790,26 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
+                <input
+                  type="text"
+                  placeholder="Search roles..."
+                  value={roleSearch}
+                  onChange={(e) => setRoleSearch(e.target.value)}
+                  className="mb-1 w-full rounded-lg border border-border bg-background px-3 py-1.5 text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-teal-500/40"
+                />
                 <SelectInput
                   label="Approval role"
                   value={s.approval_role_id}
                   onChange={(e) => changeStepRole(i, e.target.value)}
                 >
-                  {loadingRoles && approvalRoles.length === 0 && <option value={s.approval_role_id}>Loading roles…</option>}
-                  {approvalRoles.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name}
-                    </option>
-                  ))}
+                  {loadingRoles && approvalRoles.length === 0 && <option value={s.approval_role_id}>Loading roles...</option>}
+                  {approvalRoles
+                    .filter((r) => !roleSearch || r.name.toLowerCase().includes(roleSearch.toLowerCase()) || r.code.toLowerCase().includes(roleSearch.toLowerCase()))
+                    .map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name}
+                      </option>
+                    ))}
                 </SelectInput>
                 <FieldError message={err(`steps.${i}.approval_role_id`)} />
               </div>
