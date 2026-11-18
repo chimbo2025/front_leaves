@@ -129,7 +129,7 @@ export function RequestDetail({ request, isHr = false, actions }: { request: Lea
       {request.isPaid !== undefined && request.isPaid !== null && (
         <div className="rounded-xl border border-border p-3.5">
           <p className="text-[11px] text-muted-foreground">Malipo / Payment</p>
-          <p className="text-sm font-semibold text-foreground mt-0.5">{request.isPaid ? 'Inalipwa / Paid' : 'Bila malipo / Unpaid'}</p>
+          <p className={`text-sm font-semibold mt-0.5 ${request.isPaid ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>{request.isPaid ? 'Inalipwa / Paid' : 'Bila malipo / Unpaid'}</p>
         </div>
       )}
 

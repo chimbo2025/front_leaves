@@ -151,7 +151,7 @@ export function LetterView({ request, signatures = [], chain = [] }: { request: 
       <section style={{ marginTop: 16, border: `1px solid ${BORDER}`, borderRadius: 6, overflow: 'hidden' }}>
         <div className="letter-sans" style={{ padding: '8px 12px', background: '#EDF1F3', fontWeight: 700, fontSize: 12 }}>TAARIFA ZA OMBI</div>
         <div className="letter-sans" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', fontSize: 13 }}>
-          {facts.map(([label, value]) => <div key={label} style={{ padding: '9px 12px', borderTop: `1px solid ${BORDER}` }}><div className="letter-label">{label}</div><div style={{ marginTop: 3, fontWeight: 600 }}>{value}</div></div>)}
+          {facts.map(([label, value]) => <div key={label} style={{ padding: '9px 12px', borderTop: `1px solid ${BORDER}` }}><div className="letter-label">{label}</div><div style={{ marginTop: 3, fontWeight: 600, color: label === 'Malipo' ? (request.isPaid ? '#0B5E40' : request.isPaid === false ? '#9B1C1C' : undefined) : undefined }}>{value}</div></div>)}
         </div>
       </section>
 
