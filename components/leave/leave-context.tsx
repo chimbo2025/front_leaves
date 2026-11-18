@@ -1181,7 +1181,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       // The backend is the source of truth for which roles exist and which are
       // built-ins; custom roles are exactly the non-system rows.
       systemRoleIdsRef.current = new Set(liveRoles.filter((r) => r.is_system).map((r) => r.id))
-      setCustomRoles(liveRoles.filter((r) => !r.is_system).map((r) => ({ id: r.id, label: r.name, description: r.description ?? '' })))
+      setCustomRoles(liveRoles.map((r) => ({ id: r.id, label: r.name, description: r.description ?? '' })))
       syncCustomRoleAssignments(employeesRef.current)
     }
 

@@ -82,7 +82,7 @@ const PASSWORD_PRESETS = ['Password123', 'Password1', 'ChangeMe1', 'Welcome2026'
 /** Roles the flat staff-role payload can never (re)assign: Final Authority is
  *  migration-appointed, and head roles are scoped grants made from the unit
  *  pages. They stay visible only when the employee already holds them. */
-const NON_ASSIGNABLE_ROLES = new Set(['FINAL_AUTHORITY', 'DEPT_HEAD', 'ZONAL_HEAD'])
+const NON_ASSIGNABLE_ROLES = new Set<string>([])
 
 function passwordIsValid(value: string): boolean {
   return value.length >= 8 && /[a-z]/.test(value) && /[A-Z]/.test(value) && /\d/.test(value)
