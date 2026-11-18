@@ -1604,17 +1604,9 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
                   <>
                     <MultiSelect
                       label="Departments"
-                      hint="Pick every department this workflow covers. Divisions and units are not used for workflow scope."
+                      hint="Pick every department, division or unit this workflow covers."
                       options={allDepts
-                        .filter(
-                          (d) =>
-                            d.isActive !== false &&
-                            // Keep a legacy division/unit selection visible so
-                            // editing an existing workflow does not silently
-                            // drop it; new choices are departments only.
-                            (!['division', 'unit', 'independent_unit'].includes(d.unitType ?? '') ||
-                              builder.departmentIds.includes(d.id)),
-                        )
+                        .filter((d) => d.isActive !== false)
                         .map((d) => ({ value: d.id, label: d.name }))}
                       value={builder.departmentIds}
                       onChange={(ids) => setBuilder({ ...builder, departmentIds: ids })}
