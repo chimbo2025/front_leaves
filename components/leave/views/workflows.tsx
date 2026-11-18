@@ -789,7 +789,8 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
             </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
+              <div className="relative">
+                <label className="block text-[12px] font-semibold text-foreground mb-1">Approval role</label>
                 <input
                   type="text"
                   placeholder="Search roles..."
@@ -797,10 +798,10 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
                   onChange={(e) => setRoleSearch(e.target.value)}
                   className="mb-1 w-full rounded-lg border border-border bg-background px-3 py-1.5 text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-teal-500/40"
                 />
-                <SelectInput
-                  label="Approval role"
+                <select
                   value={s.approval_role_id}
-                  onChange={(e) => changeStepRole(i, e.target.value)}
+                  onChange={(e) => { changeStepRole(i, e.target.value); setRoleSearch('') }}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-2 focus:ring-teal-500/40"
                 >
                   {loadingRoles && approvalRoles.length === 0 && <option value={s.approval_role_id}>Loading roles...</option>}
                   {approvalRoles
@@ -810,7 +811,7 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
                         {r.name}
                       </option>
                     ))}
-                </SelectInput>
+                </select>
                 <FieldError message={err(`steps.${i}.approval_role_id`)} />
               </div>
 
