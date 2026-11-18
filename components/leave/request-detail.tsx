@@ -30,7 +30,7 @@ export function RequestDetail({ request, isHr = false, actions }: { request: Lea
   // The employee, leave type and policy all live in the database now. A row
   // can be missing (a deleted staff member, a removed leave type, a type with
   // no published policy) — render gracefully instead of throwing in render.
-  const { employees } = useLeave()
+  const { employees, employeeId } = useLeave()
   const emp = employees.find((e) => e.id === request.employeeId) ?? getEmployee(request.employeeId)
   const policy = policyEffectiveAt(request.leaveTypeId, request.submittedAt ?? request.createdAt)
   const zone = emp ? getZone(emp.zoneId) : undefined
@@ -187,7 +187,7 @@ export function RequestDetail({ request, isHr = false, actions }: { request: Lea
                     {s.assigneeName} {s.via === 'delegation' && <span className="text-amber-600 dark:text-amber-400">(via delegation)</span>}
                     {' · '}Due {fmtShort(s.dueAt)}
                   </p>
-                  {s.comments && (
+                  {s.comments && employeeId !== request.employeeId && (
                     <p className="text-[12px] text-foreground mt-1.5 border-t border-border/60 pt-1.5 whitespace-pre-wrap">
                       <span className="text-muted-foreground">Maoni ya mwidhinishaji / Decision comment: </span>{s.comments}
                     </p>

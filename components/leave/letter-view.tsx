@@ -68,6 +68,7 @@ export function LetterView({ request, signatures = [], chain = [] }: { request: 
     ['Kipindi', period],
     ['Muda', request.days > 0 ? `${request.days} siku` : 'Utaamuliwa na mwidhinishaji wa mwisho'],
     ['Hali ya uamuzi', approved ? 'Imeidhinishwa' : rejected ? 'Imekataliwa' : 'Inasubiri'],
+    ['Malipo', request.isPaid === false ? 'Bila malipo / Unpaid' : request.isPaid === true ? 'Inalipwa / Paid' : '—'],
   ]
 
   // The distinct approval sign-offs: collapse repeated assignees into one row,
