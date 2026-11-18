@@ -180,6 +180,7 @@ export interface LeaveRequest {
   startDate: string
   endDate: string
   days: number
+  isPaid?: boolean | null
   isHalfDay?: boolean
   emergency?: boolean
   emergencyReason?: string

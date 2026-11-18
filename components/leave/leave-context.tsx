@@ -264,7 +264,7 @@ interface LeaveContextValue {
   orgEligibility: OrgEligibility | null
   submitRequest: (input: NewRequestInput) => LeaveRequest
   updateRequest: (requestId: string, patch: Partial<Pick<LeaveRequest, 'startDate' | 'endDate' | 'reason' | 'isHalfDay'>>) => void
-  decide: (requestId: string, stepOrder: number, decision: 'approved' | 'rejected' | 'returned', comments?: string, endDate?: string, signaturePath?: string, signatureHash?: string) => void
+  decide: (requestId: string, stepOrder: number, decision: 'approved' | 'rejected' | 'returned', comments?: string, endDate?: string, signaturePath?: string, signatureHash?: string, isPaid?: boolean | null) => void
   resubmit: (requestId: string, documentName?: string) => void
   withdrawRequest: (requestId: string, reason?: string) => void
   /** Retry-submit an orphaned draft (create succeeded, submit failed). */
@@ -465,6 +465,7 @@ function requestFromRaw(d: RequestDto, slaByRole: Record<string, number>): Leave
     submittedAt: day(d.submitted_at) || undefined,
     decidedAt: day(d.decided_at) || undefined,
     signaturePath: d.signature_path ?? undefined,
+    isPaid: d.is_paid ?? undefined,
     documents: [],
     steps: stepsFromRaw(d.assignments ?? [], 1, slaByRole),
   }
@@ -491,6 +492,7 @@ function requestFromResource(prev: LeaveRequest | null, r: RequestCompact, chain
     submittedAt: day(r.submitted_at) || prev?.submittedAt,
     decidedAt: day(r.decided_at) || prev?.decidedAt,
     signaturePath: r.signature_path ?? prev?.signaturePath,
+    isPaid: r.is_paid ?? prev?.isPaid,
     documents: prev?.documents ?? [],
     steps,
   }
@@ -1550,13 +1552,13 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   )
 
   const decide = React.useCallback(
-    (requestId: string, stepOrder: number, decision: 'approved' | 'rejected' | 'returned', comments?: string, endDate?: string, signaturePath?: string, signatureHash?: string) => {
+    (requestId: string, stepOrder: number, decision: 'approved' | 'rejected' | 'returned', comments?: string, endDate?: string, signaturePath?: string, signatureHash?: string, isPaid?: boolean | null) => {
       const req = requests.find((r) => r.id === requestId)
       if (!req) return
       void (async () => {
         // signaturePath carries the ceremony image as a data URL — the API
         // stores it with the seal so the official letter can render it.
-        const res = await safe(leaveApi.requests.decide(requestId, { decision, comments, end_date: endDate || null, signature_hash: signatureHash || req.signatureHash, signature_image: signaturePath || req.signaturePath }))
+        const res = await safe(leaveApi.requests.decide(requestId, { decision, comments, end_date: endDate || null, signature_hash: signatureHash || req.signatureHash, signature_image: signaturePath || req.signaturePath, is_paid: isPaid }))
         if (!res) {
           refreshAfterWrite()
           return

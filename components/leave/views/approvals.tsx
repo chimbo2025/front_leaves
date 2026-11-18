@@ -78,6 +78,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
   const [approveComment, setApproveComment] = useState('')
   const [signatureStep, setSignatureStep] = useState<'pending' | 'completed'>('pending')
   const [signatureData, setSignatureData] = useState<{ path: string | null; hash: string | null }>({ path: null, hash: null })
+  const [approveIsPaid, setApproveIsPaid] = useState(true)
   const [approvalInsight, setApprovalInsight] = useState<ApprovalInsight | null>(null)
   const [approvalInsightLoading, setApprovalInsightLoading] = useState(false)
 
@@ -159,13 +160,13 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
     ? dayCount(approveTarget.request.startDate, approveReturnDate)
     : 0
 
-  const doDecide = (r: LeaveRequest, decision: 'approved' | 'rejected' | 'returned', endDate?: string, comment?: string, sig?: { path?: string | null; hash?: string | null }) => {
+  const doDecide = (r: LeaveRequest, decision: 'approved' | 'rejected' | 'returned', endDate?: string, comment?: string, sig?: { path?: string | null; hash?: string | null }, isPaid?: boolean | null) => {
     const step = nextStep(r)
     if (!step) return
     // Approvals always go through the signature ceremony; the collected
     // attestation travels with the decision so the API can enforce it.
     // Return/Reject carry no ceremony and the backend seals them unsigned.
-    decide(r.id, step.order, decision, comment || comments[r.id] || '(no comment)', endDate, sig?.path ?? undefined, sig?.hash ?? undefined)
+    decide(r.id, step.order, decision, comment || comments[r.id] || '(no comment)', endDate, sig?.path ?? undefined, sig?.hash ?? undefined, isPaid)
     setComments((c) => ({ ...c, [r.id]: '' }))
   }
 
@@ -491,6 +492,10 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                     <p className="text-[12px] font-mono text-foreground">
                       {approveReturnDate ? `≈ ${fmtShort(approveTarget.request.startDate)} → ${fmtShort(approveReturnDate)} · siku ${proposedDays}` : 'Weka tarehe ya kurudi ili kutoa likizo.'}
                     </p>
+                    <label className="flex items-center gap-2 text-[12px] font-semibold text-foreground">
+                      <input type="checkbox" checked={approveIsPaid} onChange={(e) => setApproveIsPaid(e.target.checked)} className="h-4 w-4 rounded border-border" />
+                      Likizo hii italipwa / This leave is paid
+                    </label>
                   </>
                 ) : (
                   <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12px] text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200">
@@ -522,7 +527,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                   disabled={approveTarget?.isFinalStep === true && !approveReturnDate}
                   onClick={() => {
                     if (!approveTarget) return
-                    doDecide(approveTarget.request, 'approved', approveTarget.isFinalStep ? approveReturnDate : undefined, approveComment.trim() || undefined, signatureData)
+                    doDecide(approveTarget.request, 'approved', approveTarget.isFinalStep ? approveReturnDate : undefined, approveComment.trim() || undefined, signatureData, approveIsPaid)
                     setSignatureStep('pending')
                     setSignatureData({ path: null, hash: null })
                     setApproveTarget(null)
