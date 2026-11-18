@@ -31,7 +31,7 @@ const KIND_META: Record<string, { icon: React.ComponentType<{ className?: string
 
 const KINDS = Object.keys(KIND_META)
 
-export function NotificationsView() {
+export function NotificationsView({ onNavigate }: { onNavigate?: (view: string) => void } = {}) {
   const { notifications, markAllRead, markRead, supervisorMode, employeeId } = useLeave()
   const [search, setSearch] = useState('')
   const [kindFilter, setKindFilter] = useState('all')
@@ -117,7 +117,7 @@ export function NotificationsView() {
                   const Icon = meta.icon
                   const unreadRow = !n.read
                   return (
-                    <tr key={n.id} onClick={() => { if (unreadRow) markRead(n.id) }} className={cn('text-[13px] align-middle group cursor-pointer', unreadRow ? 'bg-teal-50/30 dark:bg-teal-950/20' : 'opacity-75')}>
+                    <tr key={n.id} onClick={() => { if (unreadRow) markRead(n.id); if (n.kind === 'handover') onNavigate?.('cases') }} className={cn('text-[13px] align-middle group cursor-pointer', unreadRow ? 'bg-teal-50/30 dark:bg-teal-950/20' : 'opacity-75')}>
                       <td className="py-3 px-5">
                         <span className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold', meta.cls)}>
                           <Icon className="w-3 h-3" /> {meta.label}

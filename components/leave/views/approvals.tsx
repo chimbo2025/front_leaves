@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useCallback, useEffect } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import React from 'react'
 import {
   Check,
@@ -51,6 +51,8 @@ import {
 } from '@/components/leave/shared'
 import { RequestDetail } from '@/components/leave/request-detail'
 import { ApprovalModal } from '@/components/leave/approval-modal'
+import { PreviousDecisions } from '@/components/leave/previous-decisions'
+import { ApprovalInsightBoxes } from '@/components/leave/approval-insight-boxes'
 import { leaveApi, type ApprovalInsight } from '@/lib/leave-api'
 
 const STEP_STYLE: Record<StepStatus, string> = {
@@ -167,6 +169,16 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
     setComments((c) => ({ ...c, [r.id]: '' }))
   }
 
+  const startApprove = (r: LeaveRequest) => {
+    const step = nextStep(r)
+    if (!step) return
+    setApproveTarget({ request: r, stepOrder: step.order, isFinalStep: isFinalStep(r) })
+    setApproveReturnDate(r.startDate >= TODAY ? r.startDate : TODAY)
+    setApproveComment('')
+    setSignatureStep('pending')
+    setSignatureData({ path: null, hash: null })
+  }
+
   const buildMenu = (r: LeaveRequest): RowMenuItem[] => {
     const items: RowMenuItem[] = []
     const ho = pendingHoFor(r)
@@ -175,7 +187,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
     }
     items.push({ icon: Eye, label: 'View full details', onClick: () => setDetail(r) })
     if (canAct(r) && nextStep(r)) {
-      items.push({ icon: Check, label: 'Approve', onClick: () => { const step = nextStep(r)!; setApproveTarget({ request: r, stepOrder: step.order, isFinalStep: isFinalStep(r) }); setApproveReturnDate(r.startDate >= TODAY ? r.startDate : TODAY); setApproveComment(''); setSignatureStep('pending'); setSignatureData({ path: null, hash: null }) } })
+      items.push({ icon: Check, label: 'Approve', onClick: () => startApprove(r) })
       items.push({ icon: RotateCcw, label: 'Return for correction', onClick: () => doDecide(r, 'returned') })
       items.push({ icon: X, label: 'Reject', tone: 'danger', onClick: () => doDecide(r, 'rejected') })
     }
@@ -404,18 +416,38 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
       <Modal
         open={detail !== null}
         onClose={() => setDetail(null)}
-        title={detail ? `${detail.ref} — full approval chain` : 'Request details'}
-        subtitle="Documents, decision history and SLA per step."
+        title={detail ? `${detail.ref} — mfululizo kamili wa kuidhinisha` : 'Request details'}
+        subtitle="Nyaraka, historia ya maamuzi na SLA kwa kila hatua. / Documents, decision history and SLA per step."
         size="lg"
       >
-        {detail ? <RequestDetail request={detail} isHr={can('documents', 'view_medical_documents')} /> : null}
+        {detail ? (
+          <RequestDetail
+            request={detail}
+            isHr={can('documents', 'view_medical_documents')}
+            actions={
+              canAct(detail) && nextStep(detail) ? (
+                <>
+                  <Btn variant="emerald" onClick={() => { setDetail(null); startApprove(detail) }}>
+                    <Check className="w-3.5 h-3.5" /> Kubali / Approve
+                  </Btn>
+                  <Btn variant="outline" onClick={() => { doDecide(detail, 'returned'); setDetail(null) }}>
+                    <RotateCcw className="w-3.5 h-3.5" /> Irudishe / Return
+                  </Btn>
+                  <Btn variant="danger" onClick={() => { doDecide(detail, 'rejected'); setDetail(null) }}>
+                    <X className="w-3.5 h-3.5" /> Kataa / Reject
+                  </Btn>
+                </>
+              ) : undefined
+            }
+          />
+        ) : null}
       </Modal>
 
       <Modal
         open={approveTarget !== null}
         onClose={() => { setApproveTarget(null); setSignatureStep('pending'); setSignatureData({ path: null, hash: null }) }}
-        title={approveTarget ? `Approve ${approveTarget.request.ref}` : 'Approve request'}
-        subtitle={approveTarget?.isFinalStep ? 'Final approver sets the return date and granted leave duration.' : 'Record your decision. The final approver will set the return date and duration.'}
+        title={approveTarget ? `Idhinisha / Approve ${approveTarget.request.ref}` : 'Approve request'}
+        subtitle={approveTarget?.isFinalStep ? 'Mwidhinishaji wa mwisho huweka tarehe ya kurudi kazini na muda wa likizo. / The final approver sets the return date and granted duration.' : 'Rekodi uamuzi wako — tarehe ya kurudi na muda zinahifadhiwa kwa mwidhinishaji wa mwisho. / Record your decision.'}
         size="md"
       >
         {approveTarget && (
@@ -440,54 +472,45 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
             {/* Grant leave - only show after signature is complete */}
             {signatureStep === 'completed' && (
               <div className="space-y-4">
+                <PreviousDecisions steps={approveTarget.request.steps} />
                 <div className="rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2.5">
                   <p className="text-[12px] font-semibold text-foreground">
-                    {typeOf(approveTarget.request.leaveTypeId)?.name ?? 'Leave'} · proposed from {fmtShort(approveTarget.request.startDate)}
+                    {typeOf(approveTarget.request.leaveTypeId)?.name ?? 'Leave'} · imependekezwa kuanzia {fmtShort(approveTarget.request.startDate)}
                   </p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">{approveTarget.request.reason || 'No reason given.'}</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">{approveTarget.request.reason || 'Hakuna sababu iliyotolewa. / No reason given.'}</p>
                 </div>
                 {approveTarget.isFinalStep ? (
                   <>
                     <TextInput
                       type="date"
-                      label="Return to work date"
-                      hint="The day the employee resumes duty; leave days are counted up to the day before."
+                      label="Tarehe ya kurudi kazini"
+                      hint="Siku ambayo mfanyakazi anarudi kazini — siku za likizo huhesabiwa hadi siku inayotangulia."
                       value={approveReturnDate}
                       onChange={(e) => setApproveReturnDate(e.target.value)}
                     />
                     <p className="text-[12px] font-mono text-foreground">
-                      {approveReturnDate ? `≈ ${fmtShort(approveTarget.request.startDate)} → ${fmtShort(approveReturnDate)} · ${proposedDays} day${proposedDays === 1 ? '' : 's'}` : 'Set the return date to grant leave.'}
+                      {approveReturnDate ? `≈ ${fmtShort(approveTarget.request.startDate)} → ${fmtShort(approveReturnDate)} · siku ${proposedDays}` : 'Weka tarehe ya kurudi ili kutoa likizo.'}
                     </p>
                   </>
                 ) : (
                   <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12px] text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200">
-                    This is an intermediate approval step. The return date and granted days are reserved for the final approver.
+                    Hatua ya kati ya kuidhinisha. Tarehe ya kurudi na siku zilizopewa zinahifadhiwa kwa mwidhinishaji wa mwisho.
                   </p>
                 )}
-                {(approvalInsight?.annual_balance ?? annualBalance) && (
-                  <div className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-[12px] text-teal-900 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-200">
-                    Shared annual balance: {(approvalInsight?.annual_balance ?? annualBalance)!.remaining} days
-                    {approveTarget.isFinalStep
-                      ? ` before this request; approximately ${Math.max(0, (approvalInsight?.annual_balance ?? annualBalance)!.remaining - proposedDays)} after approval.`
-                      : '.'}{' '}
-                    Approved days from all leave types count in this service year.
-                  </div>
-                )}
-                {approveTarget.isFinalStep && approveTarget.request.leaveTypeId === annualTypeId && (
-                  <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12px] text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200">
-                    {approvalInsightLoading
-                      ? 'Checking the employee’s annual payment cycle…'
-                      : approvalInsight?.annual_request_number
-                        ? `This is annual leave request #${approvalInsight.annual_request_number} in the employee’s service year. ${approvalInsight.payment_eligible ? 'It is eligible for HR payment review after approval.' : 'It is not eligible for payment review in the every-second-request cycle.'}`
-                        : 'Payment-cycle insight is unavailable; HR can check eligibility after approval.'}
-                  </div>
-                )}
+                <ApprovalInsightBoxes
+                  insight={approvalInsight}
+                  loading={approvalInsightLoading}
+                  isFinalStep={approveTarget.isFinalStep}
+                  isAnnual={approveTarget.request.leaveTypeId === annualTypeId}
+                  proposedDays={proposedDays}
+                  fallbackBalance={annualBalance}
+                />
                 <TextArea
-                  label="Decision comment (recorded)"
+                  label="Maoni ya uamuzi (yanahifadhiwa)"
                   value={approveComment}
                   onChange={(e) => setApproveComment(e.target.value)}
                   rows={2}
-                  placeholder="Optional comment for the applicant…"
+                  placeholder="Maoni ya hiari kwa mwombaji…"
                 />
               </div>
             )}

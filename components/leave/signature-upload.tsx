@@ -44,9 +44,52 @@ export function SignatureUpload({
 
       reader.onload = () => {
         const dataUrl = typeof reader.result === 'string' ? reader.result : null
-        setReading(false)
-        if (dataUrl) onChange(dataUrl)
-        else setError('Could not read that image. Please try another file.')
+        if (!dataUrl) {
+          setReading(false)
+          setError('Could not read that image. Please try another file.')
+          return
+        }
+        // Remove near-white background so uploaded signatures blend on paper.
+        const img = new Image()
+        img.onload = () => {
+          const canvas = document.createElement('canvas')
+          canvas.width = img.width
+          canvas.height = img.height
+          const ctx = canvas.getContext('2d')
+          if (!ctx) {
+            setReading(false)
+            onChange(dataUrl)
+            return
+          }
+          ctx.drawImage(img, 0, 0)
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+          const data = imageData.data
+          // Sample corner colors to estimate background.
+          const samples = [
+            0,
+            (canvas.width - 1) * 4,
+            (canvas.height - 1) * canvas.width * 4,
+            ((canvas.height - 1) * canvas.width + (canvas.width - 1)) * 4,
+          ]
+          let br = 0, bg = 0, bb = 0
+          for (const i of samples) { br += data[i]; bg += data[i + 1]; bb += data[i + 2] }
+          br /= samples.length; bg /= samples.length; bb /= samples.length
+          const threshold = 40
+          for (let i = 0; i < data.length; i += 4) {
+            const r = data[i], g = data[i + 1], b = data[i + 2]
+            if (Math.abs(r - br) < threshold && Math.abs(g - bg) < threshold && Math.abs(b - bb) < threshold) {
+              data[i + 3] = 0
+            }
+          }
+          ctx.putImageData(imageData, 0, 0)
+          setReading(false)
+          onChange(canvas.toDataURL('image/png'))
+        }
+        img.onerror = () => {
+          setReading(false)
+          onChange(dataUrl)
+        }
+        img.src = dataUrl
       }
 
       reader.onerror = () => {

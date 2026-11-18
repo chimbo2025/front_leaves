@@ -264,7 +264,7 @@ interface LeaveContextValue {
   orgEligibility: OrgEligibility | null
   submitRequest: (input: NewRequestInput) => LeaveRequest
   updateRequest: (requestId: string, patch: Partial<Pick<LeaveRequest, 'startDate' | 'endDate' | 'reason' | 'isHalfDay'>>) => void
-  decide: (requestId: string, stepOrder: number, decision: 'approved' | 'rejected' | 'returned', comments: string, endDate?: string, signaturePath?: string, signatureHash?: string) => void
+  decide: (requestId: string, stepOrder: number, decision: 'approved' | 'rejected' | 'returned', comments?: string, endDate?: string, signaturePath?: string, signatureHash?: string) => void
   resubmit: (requestId: string, documentName?: string) => void
   withdrawRequest: (requestId: string, reason?: string) => void
   /** Retry-submit an orphaned draft (create succeeded, submit failed). */
@@ -277,6 +277,8 @@ interface LeaveContextValue {
   recordHandover: (caseId: string, input: { fromOwnerId?: string; toOwnerId: string; reason: string }) => void
   acceptHandover: (handoverId: string) => void
   rejectHandover: (handoverId: string, reason?: string) => void
+  /** Re-fetch every in-flight request's handovers (after a propose/accept/reject). */
+  refreshWithHandovers: () => void
   closeCase: (caseId: string, reason?: string) => void
   markAllRead: () => void
   markRead: (id: string) => void
@@ -285,9 +287,9 @@ interface LeaveContextValue {
   deleteDocument: (requestId: string, docId: string) => void
   updateEmployee: (
     employeeId: string,
-    patch: Partial<Pick<Employee, 'title' | 'email' | 'gender' | 'hireDate'>> &
-      { payrollNo?: string; positionId?: string; departmentId?: string; zoneId?: string; roleIds?: string[] },
-  ) => void
+    patch: Partial<Pick<Employee, 'name' | 'title' | 'email' | 'gender' | 'hireDate'>> &
+      { payrollNo?: string; positionId?: string; departmentId?: string; zoneId?: string; roleIds?: string[]; password?: string },
+  ) => Promise<boolean>
   toggleEmployeeActive: (employeeId: string) => void
   /** Permanent staff removal — API refuses anyone with history (422 toast). */
   deleteEmployee: (employeeId: string, reason: string) => Promise<boolean>
@@ -333,11 +335,27 @@ function day(s?: string | null): string {
   return s && s.length >= 10 ? s.slice(0, 10) : ''
 }
 
+/** Backend refusals arrive as bare role ids in `errors.role_ids`; turn the
+ *  ones a flat staff-role payload can never reassign into readable copy. */
+const ROLE_REFUSAL_TEXT: Record<string, string> = {
+  FINAL_AUTHORITY: 'Final Authority is appointed by migration and cannot be granted or removed here.',
+  DEPT_HEAD: 'Department Head must be appointed from the department head picker.',
+  ZONAL_HEAD: 'Zone Head must be appointed from the zone head picker.',
+}
+
 async function safe<T>(p: Promise<T>): Promise<T | undefined> {
   try {
     return await p
   } catch (err) {
-    toast.error(err instanceof ApiError ? err.message : 'Unexpected error — is the backend running?')
+    let message = err instanceof ApiError ? err.message : 'Unexpected error — is the backend running?'
+    if (err instanceof ApiError && err.fieldErrors) {
+      const details = Object.values(err.fieldErrors)
+        .flat()
+        .map((d) => (typeof d === 'string' ? (ROLE_REFUSAL_TEXT[d] ?? d) : ''))
+        .filter((d) => d.length > 0 && d !== message)
+      if (details.length) message = `${message} ${details.slice(0, 2).join(' ')}`
+    }
+    toast.error(message)
     return undefined
   }
 }
@@ -359,14 +377,19 @@ function stepsFromRaw(a: WorkflowAssignmentRaw[], orderBase: number, slaByRole: 
     return {
       order: orderBase + i,
       role,
-      roleLabel: roleLabels[role] ?? x.assigned_role_id,
+      // Prefer the API's catalog display name ("HR Reviewer") over the legacy
+      // permission-role label ("Human Resources"). The stored role id remains
+      // the routing key; this is display only.
+      roleLabel: x.role_label ?? roleLabels[role] ?? x.assigned_role_id,
       assigneeId: x.assigned_employee_id ?? '',
       assigneeName: x.assignee?.full_name ?? '',
-      via: 'standing',
+      via: x.via ?? (x.delegated_from_employee_id ? 'delegation' : 'standing'),
       slaDays: slaByRole[x.assigned_role_id] ?? 2,
       dueAt: day(x.due_at),
       status: stepStatus(x.status ?? 'pending'),
       actedAt: x.decided_at ? day(x.decided_at) : undefined,
+      comments: x.decision_comment ?? undefined,
+      decision: x.decision ?? undefined,
     }
   })
 }
@@ -379,30 +402,46 @@ function stepsFromCompact(a: RequestAssignment[], chain: ChainItem[] | undefined
       return {
         order: i + 1,
         role,
-        roleLabel: roleLabels[role] ?? x.role,
+        roleLabel: x.role_label ?? roleLabels[role] ?? x.role,
         assigneeId: x.assignee_id ?? '',
         assigneeName: x.assignee_name ?? '',
-        via: 'standing',
+        via: x.via ?? (x.delegated_from_id ? 'delegation' : 'standing'),
         slaDays: slaByRole[x.role] ?? 2,
         dueAt: day(x.due_at),
         status: stepStatus(x.status ?? 'pending'),
         actedAt: day(x.decided_at) || undefined,
+        comments: x.decision_comment ?? undefined,
+        decision: x.decision ?? undefined,
       }
     })
   }
+
+  // The resolved chain is the configured, ordered truth. Assignments only add
+  // the live status, so match them by step id — index alignment breaks as soon
+  // as one chain entry has no assignment (collapsed/skipped steps).
+  const byStep = new Map<string, RequestAssignment>()
+  for (const x of a) {
+    if (x.step_id != null) byStep.set(String(x.step_id), x)
+  }
+
   return items.map((ci, i) => {
-    const x = a[i]
+    const x = ci.step_id != null ? byStep.get(String(ci.step_id)) : a[i]
+    const role = (ci.role as ApproverRole) ?? 'SUPERVISOR'
     return {
       order: i + 1,
-      role: (ci.role as ApproverRole) ?? 'SUPERVISOR',
-      roleLabel: ci.role_label ?? ci.role,
-      assigneeId: ci.assignee_id ?? '',
-      assigneeName: ci.assignee_name ?? '',
+      role,
+      roleLabel: ci.role_label ?? roleLabels[role] ?? ci.role,
+      assigneeId: ci.assignee_id ?? x?.assignee_id ?? '',
+      assigneeName: ci.assignee_name ?? x?.assignee_name ?? '',
       via: ci.via ?? 'standing',
-      slaDays: ci.sla_days,
+      slaDays: ci.sla_days ?? slaByRole[ci.role] ?? 2,
       dueAt: day(ci.due_at ?? x?.due_at),
-      status: x ? stepStatus(x.status ?? 'pending') : 'pending',
+      // A chain entry with no assignment never reached the database (e.g. an
+      // optional or duplicate step) — show it as skipped, not pending.
+      status: x ? stepStatus(x.status ?? 'pending') : 'skipped',
       actedAt: day(x?.decided_at) || undefined,
+      comments: x?.decision_comment ?? undefined,
+      decision: x?.decision ?? undefined,
     }
   })
 }
@@ -425,6 +464,7 @@ function requestFromRaw(d: RequestDto, slaByRole: Record<string, number>): Leave
     createdAt: day(d.created_at) || TODAY,
     submittedAt: day(d.submitted_at) || undefined,
     decidedAt: day(d.decided_at) || undefined,
+    signaturePath: d.signature_path ?? undefined,
     documents: [],
     steps: stepsFromRaw(d.assignments ?? [], 1, slaByRole),
   }
@@ -450,6 +490,7 @@ function requestFromResource(prev: LeaveRequest | null, r: RequestCompact, chain
     createdAt: prev?.createdAt ?? TODAY,
     submittedAt: day(r.submitted_at) || prev?.submittedAt,
     decidedAt: day(r.decided_at) || prev?.decidedAt,
+    signaturePath: r.signature_path ?? prev?.signaturePath,
     documents: prev?.documents ?? [],
     steps,
   }
@@ -650,8 +691,18 @@ const NOTIFICATION_KINDS: Record<string, NotificationItem['kind']> = {
   'request.resubmitted': 'submitted',
   'deadline_upcoming': 'upcoming',
   handover: 'handover',
+  handover_proposed: 'handover',
+  handover_accepted: 'handover',
+  handover_rejected: 'handover',
   delegation: 'delegation',
   policy: 'policy',
+  // Raw aliases emitted by the seeded/demo notification rows so they do not
+  // fall through to the 'policy' default.
+  submitted: 'submitted',
+  approved: 'approved',
+  rejected: 'rejected',
+  returned: 'returned',
+  upcoming: 'upcoming',
 }
 
 function toNotification(n: NotificationDto): NotificationItem {
@@ -1499,11 +1550,13 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   )
 
   const decide = React.useCallback(
-    (requestId: string, stepOrder: number, decision: 'approved' | 'rejected' | 'returned', comments: string, endDate?: string, signaturePath?: string, signatureHash?: string) => {
+    (requestId: string, stepOrder: number, decision: 'approved' | 'rejected' | 'returned', comments?: string, endDate?: string, signaturePath?: string, signatureHash?: string) => {
       const req = requests.find((r) => r.id === requestId)
       if (!req) return
       void (async () => {
-        const res = await safe(leaveApi.requests.decide(requestId, { decision, comments, end_date: endDate || null, signature_path: signaturePath || req.signaturePath, signature_hash: signatureHash || req.signatureHash }))
+        // signaturePath carries the ceremony image as a data URL — the API
+        // stores it with the seal so the official letter can render it.
+        const res = await safe(leaveApi.requests.decide(requestId, { decision, comments, end_date: endDate || null, signature_hash: signatureHash || req.signatureHash, signature_image: signaturePath || req.signaturePath }))
         if (!res) {
           refreshAfterWrite()
           return
@@ -1776,11 +1829,12 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const updateEmployee = React.useCallback(
-    (id: string, patch: Partial<Pick<Employee, 'title' | 'email' | 'gender' | 'hireDate'>> & { payrollNo?: string; positionId?: string; departmentId?: string; zoneId?: string; roleIds?: string[]; password?: string }) => {
+    (id: string, patch: Partial<Pick<Employee, 'name' | 'title' | 'email' | 'gender' | 'hireDate'>> & { payrollNo?: string; positionId?: string; departmentId?: string; zoneId?: string; roleIds?: string[]; password?: string }): Promise<boolean> => {
       const target = employees.find((e) => e.id === id)
-      if (!target) return
-      void (async () => {
-        const body: { email?: string; payroll_no?: string; position_id?: string; department_id?: string; zone_id?: string; gender?: 'M' | 'F'; hire_date?: string; role_ids?: string[]; password?: string } = {}
+      if (!target) return Promise.resolve(false)
+      return (async () => {
+        const body: { full_name?: string; email?: string; payroll_no?: string; position_id?: string; department_id?: string; zone_id?: string; gender?: 'M' | 'F'; hire_date?: string; role_ids?: string[]; password?: string } = {}
+        if (patch.name !== undefined) body.full_name = patch.name
         if (patch.email !== undefined) body.email = patch.email
         if (patch.payrollNo !== undefined) body.payroll_no = patch.payrollNo
         if (patch.positionId !== undefined) body.position_id = patch.positionId
@@ -1794,12 +1848,13 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
           // `safe` already toasts the server error; bail so a failed PATCH
           // never reaches the reload + success toast below.
           const res = await safe(leaveApi.org.updateEmployee(id, body))
-          if (!res) return
+          if (!res) return false
         }
         await safe(loadEmployees())
         const name = target.name
         if (patch.title) toast.info(`${name} title cannot be edited via the API — update the position instead.`)
         else toast.success('Staff profile updated.')
+        return true
       })()
     },
     [employees, loadEmployees],
@@ -2594,6 +2649,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         recordHandover,
         acceptHandover,
         rejectHandover,
+        refreshWithHandovers,
         closeCase,
         markAllRead,
         markRead,

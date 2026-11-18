@@ -73,7 +73,7 @@ const CasesView = lazy<Record<string, never>>(() =>
     default: m.CasesView,
   })),
 );
-const NotificationsView = lazy<Record<string, never>>(() =>
+const NotificationsView = lazy<{ onNavigate?: (v: string) => void }>(() =>
   import("@/components/leave/views/notifications").then((m) => ({
     default: m.NotificationsView,
   })),
@@ -139,7 +139,7 @@ function ViewRenderer({
     case "cases":
       return <CasesView />;
     case "notifications":
-      return <NotificationsView />;
+      return <NotificationsView onNavigate={onNavigate} />;
     case "reports":
       return <ReportsView />;
     case "audit":

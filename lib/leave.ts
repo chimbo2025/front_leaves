@@ -156,6 +156,8 @@ export interface ApprovalStep {
   status: StepStatus
   comments?: string
   actedAt?: string
+  /** approved/returned/rejected — the decision recorded at this step. */
+  decision?: 'approved' | 'returned' | 'rejected' | null
 }
 
 export interface Document {

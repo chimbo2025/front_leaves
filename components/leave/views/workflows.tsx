@@ -19,6 +19,11 @@ import {
   RefreshCw,
   Info,
   X,
+  Eye,
+  Calendar,
+  Clock,
+  Building2,
+  User,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -27,6 +32,7 @@ import {
   ApiError,
   leaveApi,
   type ApprovalRoleDto,
+  type EmployeeDto,
   type WorkflowAssignmentMode,
   type WorkflowCheckResult,
   type WorkflowDefDto,
@@ -42,11 +48,11 @@ import {
   SelectInput,
   MultiSelect,
   TextInput,
-  TextArea,
   Modal,
   ConfirmModal,
   RowMenu,
   Pagination,
+  Avatar,
 } from '@/components/leave/shared'
 
 // ---------------------------------------------------------------------------
@@ -72,6 +78,8 @@ interface BuilderState {
 
 interface StepDraft {
   approval_role_id: string
+  approver_employee_id: string
+  approver_name: string
   fallback_approval_role_id: string
   assignment_mode: WorkflowAssignmentMode
   scope_type: WorkflowStepScope
@@ -162,19 +170,6 @@ function roleDefaults(roleId: string) {
   )
 }
 
-const STEP_SCOPE_LABELS: Record<string, string> = {
-  requester_department: "Requester's department",
-  requester_division: "Requester's division",
-  requester_unit: "Requester's unit",
-  requester_zone: "Requester's zone",
-  office_wide: 'Entire office',
-}
-
-const MODE_LABELS: Record<WorkflowAssignmentMode, string> = {
-  assigned_approver: 'Assigned approver',
-  shared_queue: 'Shared queue',
-}
-
 function scopeKindLabel(kind?: string | null): string {
   if (kind === 'department') return 'Department'
   if (kind === 'zone') return 'Zone'
@@ -246,21 +241,6 @@ function Banner({
   )
 }
 
-function ModePill({ mode }: { mode: WorkflowAssignmentMode }) {
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold',
-        mode === 'shared_queue'
-          ? 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900 dark:bg-violet-950 dark:text-violet-300'
-          : 'border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-900 dark:bg-teal-950 dark:text-teal-300',
-      )}
-    >
-      {MODE_LABELS[mode]}
-    </span>
-  )
-}
-
 // ---------------------------------------------------------------------------
 // View
 // ---------------------------------------------------------------------------
@@ -300,6 +280,11 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
       approvalRoles.find((r) => r.id === roleId)?.name ?? (roleId ? roleId.replace(/_/g, ' ') : 'Unassigned'),
     [approvalRoles],
   )
+
+  // ---- Role holders (approver dropdown) ---------------------------------
+  const [holdersByRole, setHoldersByRole] = useState<Record<string, EmployeeDto[]>>({})
+  const [approverSearch, setApproverSearch] = useState<Record<number, string>>({})
+  const [loadingHolders, setLoadingHolders] = useState<Record<string, boolean>>({})
 
   // ---- List state (URL-persisted) ---------------------------------------
   const initial = useMemo(readWorkflowQuery, [])
@@ -434,7 +419,25 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
   const [saveError, setSaveError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({})
   const [deleteDef, setDeleteDef] = useState<WorkflowDefDto | null>(null)
+  const [viewDef, setViewDef] = useState<WorkflowDefDto | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  // Fetch the holder list for every role currently used in the chain. Cached
+  // per role so switching steps back and forth does not refetch.
+  useEffect(() => {
+    const roleIds = Array.from(new Set(draftSteps.map((s) => s.approval_role_id).filter(Boolean)))
+
+    roleIds.forEach((roleId) => {
+      if (holdersByRole[roleId] !== undefined || loadingHolders[roleId]) return
+
+      setLoadingHolders((prev) => ({ ...prev, [roleId]: true }))
+      void leaveApi.workflows
+        .roleHolders(roleId)
+        .then((res) => setHoldersByRole((prev) => ({ ...prev, [roleId]: res.data ?? [] })))
+        .catch(() => setHoldersByRole((prev) => ({ ...prev, [roleId]: [] })))
+        .finally(() => setLoadingHolders((prev) => ({ ...prev, [roleId]: false })))
+    })
+  }, [draftSteps, holdersByRole, loadingHolders])
 
   const err = (key: string) => fieldErrors[key]?.[0]
 
@@ -461,6 +464,8 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
     setDraftSteps([
       {
         approval_role_id: 'supervisor',
+        approver_employee_id: '',
+        approver_name: '',
         fallback_approval_role_id: '',
         assignment_mode: defaults.mode,
         scope_type: defaults.scope,
@@ -498,6 +503,8 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
         const defaults = roleDefaults(catalogId)
         return {
           approval_role_id: catalogId,
+          approver_employee_id: s.approver_employee_id ?? s.approver?.id ?? '',
+          approver_name: s.approver?.full_name ?? '',
           fallback_approval_role_id: s.fallback_approval_role_id ?? '',
           assignment_mode: s.assignment_mode ?? defaults.mode,
           scope_type: s.scope_type ?? defaults.scope,
@@ -539,6 +546,8 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
       ...prev,
       {
         approval_role_id: preferred,
+        approver_employee_id: '',
+        approver_name: '',
         fallback_approval_role_id: '',
         assignment_mode: defaults.mode,
         scope_type: defaults.scope,
@@ -558,7 +567,9 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
     setDraftSteps((prev) =>
       prev.map((s, i) => {
         if (i !== index) return s
-        const next = { ...s, approval_role_id: roleId }
+        // The approver belongs to the previous role; clear it so the
+        // administrator consciously picks a holder of the new role.
+        const next = { ...s, approval_role_id: roleId, approver_employee_id: '', approver_name: '' }
         const defaults = roleDefaults(roleId)
         // Apply the spec's per-role defaults only when the previous values were
         // still the old role's defaults — never overwrite deliberate choices.
@@ -601,13 +612,15 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
           id: builder.mode === 'edit' ? builder.defId : undefined,
           leave_type_id: builder.leaveTypeId,
           workflow_title: builder.title.trim() || undefined,
-          min_duration_days: 1,
-          max_duration_days: null,
+          min_duration_days: builder.mode === 'edit' ? Math.max(1, builder.minDays) : 1,
+          max_duration_days:
+            builder.mode === 'edit' && builder.maxDays !== '' ? Number(builder.maxDays) : null,
           zone_id: builder.scopeKind === 'zone' ? builder.zoneId || null : null,
           department_ids: builder.scopeKind === 'department' ? builder.departmentIds : [],
           steps: draftSteps.map((s) => ({
             approval_role_id: s.approval_role_id,
-            assignment_mode: s.assignment_mode,
+            approver_employee_id: s.approver_employee_id || null,
+            assignment_mode: 'assigned_approver' as const,
             scope_type: s.scope_type,
             is_mandatory: s.is_mandatory,
             note: s.note,
@@ -643,13 +656,13 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
     if (draftSteps.length === 0) local.steps = ['Add at least one approval step.']
     draftSteps.forEach((s, i) => {
       if (!s.approval_role_id) local[`steps.${i}.approval_role_id`] = ['Select an approval role.']
-      if (s.fallback_approval_role_id && s.fallback_approval_role_id === s.approval_role_id) {
-        local[`steps.${i}.fallback_approval_role_id`] = ['The fallback role must be different from the approval role.']
+      if (!s.approver_employee_id) {
+        local[`steps.${i}.approver_employee_id`] = ['Select the employee who will approve this step.']
       }
     })
     if (builder.scopeKind === 'zone' && !builder.zoneId) local.zone_id = ['Select a zone.']
     if (builder.scopeKind === 'department' && builder.departmentIds.length === 0) {
-      local.department_ids = ['Select at least one department, division or unit.']
+      local.department_ids = ['Select at least one department.']
     }
 
     if (Object.keys(local).length > 0) {
@@ -661,15 +674,21 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
     const payload = {
       workflow_title: title,
       leave_type_id: builder.leaveTypeId,
-      min_duration_days: 1,
-      max_duration_days: null,
+      // Duration bands are no longer edited here, but existing definitions keep
+      // their stored values instead of silently collapsing to "any duration".
+      min_duration_days: builder.mode === 'edit' ? Math.max(1, builder.minDays) : 1,
+      max_duration_days:
+        builder.mode === 'edit' && builder.maxDays !== '' ? Number(builder.maxDays) : null,
       zone_id: builder.scopeKind === 'zone' ? builder.zoneId || null : null,
       department_ids: builder.scopeKind === 'department' ? builder.departmentIds : [],
       notes: builder.notes.trim() || null,
+      // The new builder always names an approver: the API enforces the flag
+      // server-side, so a step cannot silently fall back to dynamic resolution.
+      strict_approvers: true,
       steps: draftSteps.map((s) => ({
         approval_role_id: s.approval_role_id,
-        fallback_approval_role_id: s.fallback_approval_role_id || null,
-        assignment_mode: s.assignment_mode,
+        approver_employee_id: s.approver_employee_id,
+        assignment_mode: 'assigned_approver' as const,
         scope_type: s.scope_type,
         sla_days: s.sla_days,
         is_mandatory: s.is_mandatory,
@@ -698,6 +717,7 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
       setSaveError(
         errors.workflow?.[0] ??
           errors.workflow_title?.[0] ??
+          Object.values(errors)[0]?.[0] ??
           api?.message ??
           'Could not save the workflow. Check the fields and try again.',
       )
@@ -738,22 +758,6 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
   // ---- Builder helpers ---------------------------------------------------
   const checkConflict = preview?.conflict === true
 
-  const builderDurationSummary = 'requests of any duration'
-
-  const stepScopeOptions = (current: string) => {
-    const options = [
-      { value: 'requester_department', label: "Requester's department" },
-      { value: 'requester_zone', label: "Requester's zone" },
-      { value: 'office_wide', label: 'Entire office' },
-    ]
-    // Legacy rows keep their original division/unit scope selectable so a
-    // simple edit does not silently re-route them.
-    if (current === 'requester_division' || current === 'requester_unit') {
-      options.push({ value: current, label: STEP_SCOPE_LABELS[current] ?? current })
-    }
-    return options
-  }
-
   const stepsEditor = (
     <div className="space-y-4">
       {draftSteps.length === 0 && (
@@ -763,14 +767,17 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
       )}
 
       {draftSteps.map((s, i) => {
-        const defaults = roleDefaults(s.approval_role_id)
+        const holders = holdersByRole[s.approval_role_id] ?? []
+        const loading = loadingHolders[s.approval_role_id] === true
+        const selected = s.approver_employee_id
+        const selectedHolder = holders.find((h) => h.id === selected)
+        const selectedName = s.approver_name || selectedHolder?.full_name || ''
+        const stale = Boolean(selected) && !loading && holders.length > 0 && !selectedHolder
+
         return (
           <div key={i} className="rounded-xl border border-border bg-warm dark:bg-muted/30 p-3.5 space-y-3">
             <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-2">
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-mono font-bold text-teal-700 dark:text-teal-300">Step {i + 1}</span>
-                <ModePill mode={s.assignment_mode} />
-              </div>
+              <span className="text-[11px] font-mono font-bold text-teal-700 dark:text-teal-300">Step {i + 1}</span>
               <button
                 type="button"
                 onClick={() => removeStep(i)}
@@ -797,102 +804,54 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
                 <FieldError message={err(`steps.${i}.approval_role_id`)} />
               </div>
 
-              <div>
-                <SelectInput
-                  label="Assignment mode"
-                  value={s.assignment_mode}
-                  onChange={(e) => updateStep(i, { assignment_mode: e.target.value as WorkflowAssignmentMode })}
-                >
-                  <option value="assigned_approver">Assigned approver</option>
-                  <option value="shared_queue">Shared queue</option>
-                </SelectInput>
-                <p className="mt-1 text-[10px] leading-snug text-muted-foreground">
-                  {s.assignment_mode === 'shared_queue'
-                    ? 'Any eligible holder may act. The first final action is recorded; no claim step is created.'
-                    : 'Only the resolved approver (or their active delegate) can act.'}
-                </p>
-              </div>
-
-              <SelectInput
-                label="Step scope"
-                value={s.scope_type}
-                onChange={(e) => updateStep(i, { scope_type: e.target.value as WorkflowStepScope })}
-              >
-                {stepScopeOptions(s.scope_type).map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </SelectInput>
-
-              <div>
-                <SelectInput
-                  label="Fallback role (optional)"
-                  value={s.fallback_approval_role_id}
-                  onChange={(e) => updateStep(i, { fallback_approval_role_id: e.target.value })}
-                >
-                  <option value="">No fallback</option>
-                  {approvalRoles
-                    .filter((r) => r.id !== s.approval_role_id)
-                    .map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.name}
-                      </option>
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-semibold text-foreground">Approver</label>
+                <TextInput
+                  placeholder="Search employee…"
+                  value={approverSearch[i] ?? ''}
+                  onChange={(e) => setApproverSearch((prev) => ({ ...prev, [i]: e.target.value }))}
+                />
+                <div className="max-h-40 overflow-y-auto rounded-lg border border-border bg-background">
+                  {loading && <p className="px-3 py-2 text-[11px] text-muted-foreground">Loading employees…</p>}
+                  {!loading && holders.length === 0 && (
+                    <p className="px-3 py-2 text-[11px] text-muted-foreground">No employees hold this role</p>
+                  )}
+                  {holders
+                    .filter((h) =>
+                      (approverSearch[i] ?? '').trim() === ''
+                        ? true
+                        : h.full_name.toLowerCase().includes((approverSearch[i] ?? '').toLowerCase()),
+                    )
+                    .map((h) => (
+                      <button
+                        key={h.id}
+                        type="button"
+                        onClick={() => {
+                          updateStep(i, { approver_employee_id: h.id, approver_name: h.full_name })
+                          setApproverSearch((prev) => ({ ...prev, [i]: '' }))
+                        }}
+                        className={cn(
+                          'block w-full px-3 py-1.5 text-left text-[12px] hover:bg-muted/40',
+                          selected === h.id && 'bg-teal-50 font-semibold text-teal-800 dark:bg-teal-950/40 dark:text-teal-200',
+                        )}
+                      >
+                        {h.full_name}
+                      </button>
                     ))}
-                </SelectInput>
-                <FieldError message={err(`steps.${i}.fallback_approval_role_id`)} />
-              </div>
-
-              <TextInput
-                label="SLA (days to act)"
-                type="number"
-                min={1}
-                max={90}
-                value={s.sla_days}
-                onChange={(e) => updateStep(i, { sla_days: Math.max(1, Number(e.target.value) || 1) })}
-              />
-
-              <div className="flex flex-col justify-end gap-2 pb-1">
-                <label htmlFor={`mandatory_${i}`} className="flex items-start gap-2 text-xs font-medium text-foreground">
-                  <input
-                    id={`mandatory_${i}`}
-                    type="checkbox"
-                    checked={s.is_mandatory}
-                    onChange={(e) => updateStep(i, { is_mandatory: e.target.checked })}
-                    className="mt-0.5 rounded border-border text-teal-700 focus:ring-teal-700"
-                  />
-                  <span>
-                    Mandatory step
-                    <span className="block text-[10px] font-normal text-muted-foreground">
-                      Blocks submission when the role has no holder
-                    </span>
-                  </span>
-                </label>
-                <label htmlFor={`allow_same_${i}`} className="flex items-start gap-2 text-xs font-medium text-foreground">
-                  <input
-                    id={`allow_same_${i}`}
-                    type="checkbox"
-                    checked={s.allow_same_person_as_previous_steps}
-                    onChange={(e) => updateStep(i, { allow_same_person_as_previous_steps: e.target.checked })}
-                    className="mt-0.5 rounded border-border text-teal-700 focus:ring-teal-700"
-                  />
-                  <span>
-                    Allow same approver in consecutive steps
-                    <span className="block text-[10px] font-normal text-muted-foreground">
-                      Do not collapse when the resolved person repeats
-                    </span>
-                  </span>
-                </label>
+                </div>
+                <FieldError message={err(`steps.${i}.approver_employee_id`)} />
               </div>
             </div>
 
-            <TextArea
-              label="Instructions for the approver"
-              rows={2}
-              value={s.note}
-              placeholder={defaults.note}
-              onChange={(e) => updateStep(i, { note: e.target.value })}
-            />
+            <div className="rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-[12px] font-semibold text-teal-800 dark:border-teal-900 dark:bg-teal-950/50 dark:text-teal-200">
+              {selected ? `Approver: ${selectedName || 'Selected employee'}` : 'Approver: not selected yet'}
+            </div>
+
+            {stale && (
+              <p className="text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                This employee no longer holds the selected role. Choose a current holder.
+              </p>
+            )}
           </div>
         )
       })}
@@ -935,9 +894,6 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
             <p>
               <span className="font-semibold text-foreground">Applies to:</span> {preview.applies_to}
             </p>
-            <p className="mt-1">
-              <span className="font-semibold text-foreground">Duration:</span> {preview.duration_label}
-            </p>
           </div>
 
           <div>
@@ -955,8 +911,7 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
                       {s.approval_role_name ?? roleName(s.approval_role_id)}
                     </p>
                     <p className="text-[10px] text-muted-foreground">
-                      {MODE_LABELS[s.assignment_mode]} · {STEP_SCOPE_LABELS[s.scope_type] ?? s.scope_type}
-                      {s.is_mandatory ? ' · mandatory' : ''}
+                      {s.approver_name ? `Approver: ${s.approver_name}` : 'Approver not selected'}
                     </p>
                   </div>
                 </li>
@@ -999,7 +954,7 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
     <div className="mx-auto max-w-[1400px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
       <SectionHeading
         title="Approval workflows"
-        subtitle="Each leave type routes through an ordered chain of approval roles. A workflow is identified by its title; scope decides who it applies to."
+        subtitle="Each leave type routes through an ordered chain of approval steps. Every step names the role and the employee who will approve it."
         actions={
           <div className="flex items-center gap-2">
             {canCreateWorkflows && (
@@ -1191,9 +1146,11 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
                             <span
                               key={s.id ?? i}
                               className="inline-flex items-center gap-1 rounded-full border border-border bg-warm px-2 py-0.5 text-[10px] font-semibold text-foreground dark:bg-muted/30"
-                              title={`${MODE_LABELS[s.assignment_mode ?? 'assigned_approver']} · ${
-                                STEP_SCOPE_LABELS[s.scope_type ?? 'requester_department'] ?? s.scope_type
-                              }`}
+                              title={
+                                s.approver?.full_name
+                                  ? `Approver: ${s.approver.full_name}`
+                                  : 'No approver selected — legacy role resolution'
+                              }
                             >
                               {i + 1}. {s.approval_role?.name ?? roleName(s.approval_role_id)}
                             </span>
@@ -1222,25 +1179,37 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
                         {fmtDate(def.updated_at)}
                       </td>
                       <td className="px-3 py-3 text-right">
-                        {canEditWorkflows && (
-                          <RowMenu
-                            items={[
-                              { icon: Pencil, label: 'Edit workflow', onClick: () => openEdit(def) },
-                              {
-                                icon: Power,
-                                label: active ? 'Deactivate' : 'Activate',
-                                tone: active ? 'danger' : 'default',
-                                onClick: () => void toggleActive(def),
-                              },
-                              {
-                                icon: Trash2,
-                                label: 'Delete workflow',
-                                tone: 'danger',
-                                onClick: () => setDeleteDef(def),
-                              },
-                            ]}
-                          />
-                        )}
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setViewDef(def)}
+                            aria-label={`View details for ${def.workflow_title}`}
+                            title="View workflow details"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition-colors hover:border-primary/40 hover:bg-secondary hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                          </button>
+                          {canEditWorkflows && (
+                            <RowMenu
+                              items={[
+                                { icon: Eye, label: 'View details', onClick: () => setViewDef(def) },
+                                { icon: Pencil, label: 'Edit workflow', onClick: () => openEdit(def) },
+                                {
+                                  icon: Power,
+                                  label: active ? 'Deactivate' : 'Activate',
+                                  tone: active ? 'danger' : 'default',
+                                  onClick: () => void toggleActive(def),
+                                },
+                                {
+                                  icon: Trash2,
+                                  label: 'Delete workflow',
+                                  tone: 'danger',
+                                  onClick: () => setDeleteDef(def),
+                                },
+                              ]}
+                            />
+                          )}
+                        </div>
                       </td>
                     </tr>
                   )
@@ -1288,6 +1257,202 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
       )}
 
       {/* ---------------------------------------------------------------- */}
+      {/* Workflow details                                                  */}
+      {/* ---------------------------------------------------------------- */}
+      <Modal
+        open={viewDef !== null}
+        onClose={() => setViewDef(null)}
+        title={
+          <span className="flex items-center gap-2">
+            <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <WorkflowIcon className="h-3.5 w-3.5" />
+            </span>
+            {viewDef?.workflow_title ?? 'Workflow details'}
+          </span>
+        }
+        subtitle={
+          viewDef
+            ? `${typeOf(viewDef.leave_type_id)?.name ?? viewDef.leave_type_name ?? 'Leave type'} · version ${viewDef.version}`
+            : undefined
+        }
+        size="lg"
+        footer={
+          <div className="flex w-full items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              {(viewDef?.steps ?? []).length} approval {(viewDef?.steps ?? []).length === 1 ? 'step' : 'steps'}
+            </span>
+            <div className="flex items-center gap-2">
+              <Btn variant="outline" onClick={() => setViewDef(null)}>
+                Close
+              </Btn>
+              {canEditWorkflows && viewDef && (
+                <Btn
+                  onClick={() => {
+                    const def = viewDef
+                    setViewDef(null)
+                    openEdit(def)
+                  }}
+                >
+                  <Pencil className="h-3.5 w-3.5" /> Edit workflow
+                </Btn>
+              )}
+            </div>
+          </div>
+        }
+      >
+        {viewDef &&
+          (() => {
+            const lt = typeOf(viewDef.leave_type_id)
+            const active = viewDef.is_active !== false
+            const steps = [...(viewDef.steps ?? [])].sort((a, b) => a.step_order - b.step_order)
+            const meta: Array<{ icon: typeof Building2; label: string; value: string }> = [
+              { icon: Building2, label: 'Scope', value: scopeKindLabel(viewDef.scope_kind) },
+              { icon: Calendar, label: 'Duration rule', value: viewDef.duration_label ?? conciseDuration(viewDef) },
+              { icon: Clock, label: 'Effective from', value: fmtDate(viewDef.effective_from) },
+              { icon: RefreshCw, label: 'Last updated', value: fmtDate(viewDef.updated_at) },
+            ]
+
+            return (
+              <div className="space-y-5">
+                <div className="overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-secondary/80 via-secondary/30 to-card">
+                  <div className="flex flex-wrap items-start justify-between gap-3 p-4">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <span
+                        className={cn(
+                          'mt-1 h-3 w-3 shrink-0 rounded-full ring-4 ring-background',
+                          lt?.color ?? 'bg-zinc-400',
+                        )}
+                      />
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-semibold text-foreground">
+                          {lt?.name ?? viewDef.leave_type_name ?? 'Leave type'}
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">
+                          {viewDef.applies_to ?? viewDef.scope_label ?? scopeKindLabel(viewDef.scope_kind)}
+                        </p>
+                      </div>
+                    </div>
+                    <span
+                      className={cn(
+                        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold',
+                        active
+                          ? 'border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-900 dark:bg-teal-950 dark:text-teal-300'
+                          : 'border-border bg-muted text-muted-foreground',
+                      )}
+                    >
+                      <span className={cn('h-1.5 w-1.5 rounded-full', active ? 'bg-teal-500' : 'bg-zinc-400')} />
+                      {active ? 'Active' : 'Inactive'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-px border-t border-border bg-border sm:grid-cols-4">
+                    {meta.map(({ icon: Icon, label, value }) => (
+                      <div key={label} className="flex items-start gap-2 bg-card px-3 py-2.5">
+                        <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <div className="min-w-0">
+                          <p className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+                          <p className="mt-0.5 truncate text-[11px] font-medium text-foreground" title={value}>
+                            {value}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-3 flex items-end justify-between gap-2">
+                    <div>
+                      <p className="text-[12px] font-semibold text-foreground">Approval chain</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        Requests move through these steps in order; each names the role and the employee who approves it.
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-border bg-warm px-2 py-0.5 text-[10px] font-semibold text-muted-foreground dark:bg-muted/30">
+                      {steps.length} {steps.length === 1 ? 'step' : 'steps'}
+                    </span>
+                  </div>
+
+                  {steps.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-rose-200 bg-rose-50/60 px-4 py-6 text-center dark:border-rose-900 dark:bg-rose-950/20">
+                      <AlertTriangle className="mx-auto mb-2 h-4 w-4 text-rose-500" />
+                      <p className="text-[12px] font-semibold text-rose-700 dark:text-rose-300">
+                        No approval steps configured
+                      </p>
+                      <p className="mt-0.5 text-[10px] text-rose-600/80 dark:text-rose-300/80">
+                        This workflow cannot route submissions until a step is added.
+                      </p>
+                    </div>
+                  ) : (
+                    <ol className="space-y-0">
+                      {steps.map((s, i) => {
+                        const last = i === steps.length - 1
+                        const approver = s.approver
+                        return (
+                          <li key={s.id ?? `${s.step_order}-${i}`} className="flex gap-3 pb-3 last:pb-0">
+                            <div className="flex flex-col items-center">
+                              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-[11px] font-bold text-primary">
+                                {i + 1}
+                              </span>
+                              {!last && <span className="mt-1 w-px flex-1 bg-border" />}
+                            </div>
+                            <div className="min-w-0 flex-1 rounded-xl border border-border bg-card p-3">
+                              <div className="flex flex-wrap items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                    Step {i + 1}
+                                  </p>
+                                  <p className="text-[12px] font-semibold text-foreground">
+                                    {s.approval_role?.name ?? roleName(s.approval_role_id ?? s.role_required)}
+                                  </p>
+                                </div>
+                                <span className="rounded-full border border-border bg-secondary/60 px-2 py-0.5 text-[9px] font-semibold text-muted-foreground">
+                                  {s.assignment_mode === 'shared_queue' ? 'Shared queue' : 'Assigned approver'}
+                                </span>
+                              </div>
+                              <div className="mt-2.5 flex items-center gap-2.5 rounded-lg border border-border/70 bg-secondary/40 px-2.5 py-2">
+                                {approver ? (
+                                  <Avatar
+                                    id={approver.id}
+                                    name={approver.full_name}
+                                    initials={approver.avatar_initials ?? approver.initials}
+                                    photoUrl={approver.avatar_url}
+                                    size="sm"
+                                  />
+                                ) : (
+                                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-dashed border-border bg-card text-muted-foreground">
+                                    <User className="h-3 w-3" />
+                                  </span>
+                                )}
+                                <div className="min-w-0">
+                                  <p className="truncate text-[11px] font-semibold text-foreground">
+                                    {approver?.full_name ?? 'Resolved from role holders at submission'}
+                                  </p>
+                                  <p className="truncate text-[10px] text-muted-foreground">
+                                    {approver
+                                      ? approver.position?.title ?? approver.email ?? 'Approver'
+                                      : 'No specific employee pinned — legacy role resolution'}
+                                  </p>
+                                </div>
+                              </div>
+                              {s.note && (
+                                <p className="mt-2 border-l-2 border-border pl-2 text-[10px] italic text-muted-foreground">
+                                  {s.note}
+                                </p>
+                              )}
+                            </div>
+                          </li>
+                        )
+                      })}
+                    </ol>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
+      </Modal>
+
+      {/* ---------------------------------------------------------------- */}
       {/* Builder                                                          */}
       {/* ---------------------------------------------------------------- */}
       <Modal
@@ -1300,7 +1465,7 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
               ? `Edit workflow — ${builder.title || typeOf(builder.leaveTypeId)?.name || ''}`
               : 'Workflow builder'
         }
-        subtitle="A workflow is a reusable rule about roles, never a roster. Scope decides who it applies to."
+        subtitle="Name the workflow, choose where it applies, then pick an approver for each step."
         size="xl"
         footer={
           <div className="flex w-full items-center justify-between gap-2">
@@ -1427,18 +1592,23 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
                 {builder.scopeKind === 'department' && (
                   <>
                     <MultiSelect
-                      label="Departments, divisions or units"
-                      hint="Pick every placement this workflow covers — e.g. the Finance division plus two independent units — instead of creating one workflow per placement."
+                      label="Departments"
+                      hint="Pick every department this workflow covers. Divisions and units are not used for workflow scope."
                       options={allDepts
-                        .filter((d) => d.isActive !== false)
-                        .map((d) => ({
-                          value: d.id,
-                          label: `${d.name}${d.unitType ? ` · ${d.unitType.replace('_', ' ')}` : ''}`,
-                        }))}
+                        .filter(
+                          (d) =>
+                            d.isActive !== false &&
+                            // Keep a legacy division/unit selection visible so
+                            // editing an existing workflow does not silently
+                            // drop it; new choices are departments only.
+                            (!['division', 'unit', 'independent_unit'].includes(d.unitType ?? '') ||
+                              builder.departmentIds.includes(d.id)),
+                        )
+                        .map((d) => ({ value: d.id, label: d.name }))}
                       value={builder.departmentIds}
                       onChange={(ids) => setBuilder({ ...builder, departmentIds: ids })}
-                      placeholder="Search or pick placements…"
-                      searchPlaceholder="Type to filter departments, divisions or units…"
+                      placeholder="Search or pick departments…"
+                      searchPlaceholder="Type to filter departments…"
                       searchable
                     />
                     <FieldError message={err('department_ids')} />
@@ -1462,24 +1632,14 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
                               .slice(0, 2)
                               .map((id) => allDepts.find((d) => d.id === id)?.name ?? id)
                               .join(', ')} +${builder.departmentIds.length - 2} more)`
-                        : 'Select at least one department, division or unit'}
+                        : 'Select at least one department'}
                 </div>
-
-                <TextArea
-                  label="Administrator notes (optional)"
-                  rows={2}
-                  maxLength={500}
-                  value={builder.notes}
-                  placeholder="Why this chain exists, what changed, or who approved it."
-                  onChange={(e) => setBuilder({ ...builder, notes: e.target.value })}
-                />
-                <FieldError message={err('notes')} />
               </section>
 
               {/* Steps */}
               <section className="space-y-3">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Approval chain</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Approval steps</p>
                   <span className="text-[10px] text-muted-foreground">Ordered top to bottom</span>
                 </div>
                 {stepsEditor}

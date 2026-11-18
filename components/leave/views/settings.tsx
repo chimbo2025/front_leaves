@@ -1,6 +1,7 @@
 'use client'
 
 import { Fragment, useState, useEffect } from 'react'
+import { toast } from 'sonner'
 import {
   Building2,
   MapPin,
@@ -77,6 +78,11 @@ function RowAvatar({ e, size = 'sm' }: { e: EmployeeRow; size?: 'sm' | 'md' | 'l
  *  rule (min 8 chars, upper + lower + digit) — the old `password` /
  *  `password123` presets were rejected with a 422 on save. */
 const PASSWORD_PRESETS = ['Password123', 'Password1', 'ChangeMe1', 'Welcome2026']
+
+/** Roles the flat staff-role payload can never (re)assign: Final Authority is
+ *  migration-appointed, and head roles are scoped grants made from the unit
+ *  pages. They stay visible only when the employee already holds them. */
+const NON_ASSIGNABLE_ROLES = new Set(['FINAL_AUTHORITY', 'DEPT_HEAD', 'ZONAL_HEAD'])
 
 function passwordIsValid(value: string): boolean {
   return value.length >= 8 && /[a-z]/.test(value) && /[A-Z]/.test(value) && /\d/.test(value)
@@ -192,7 +198,7 @@ export function SettingsView() {
   const [activeFilter, setActiveFilter] = useState('all')
   const [viewTarget, setViewTarget] = useState<EmployeeRow | null>(null)
   const [editTarget, setEditTarget] = useState<EmployeeRow | null>(null)
-  const [editDraft, setEditDraft] = useState({ title: '', email: '', payrollNo: '', positionId: '', departmentId: '', zoneId: '', gender: 'M' as 'M' | 'F', hireDate: '', roleIds: [] as string[], password: '' })
+  const [editDraft, setEditDraft] = useState({ name: '', title: '', email: '', payrollNo: '', positionId: '', departmentId: '', zoneId: '', gender: 'M' as 'M' | 'F', hireDate: '', roleIds: [] as string[], password: '' })
   const [toggleTarget, setToggleTarget] = useState<EmployeeRow | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<EmployeeRow | null>(null)
   const [deleteReason, setDeleteReason] = useState('')
@@ -323,6 +329,17 @@ export function SettingsView() {
     ...Object.keys(rolePermissions).filter((id) => !(id in roleLabels)),
   ]
 
+  // Protected roles stay in the picker only for people who already hold them,
+  // so a bulk "select shown" cannot quietly include Final Authority or a head
+  // role and make the whole save 422.
+  const rolePickerOptions = (held: string[] = []) =>
+    allRoleIds
+      .filter((id) => !NON_ASSIGNABLE_ROLES.has(id) || held.includes(id))
+      .map((id) => ({
+        value: id,
+        label: NON_ASSIGNABLE_ROLES.has(id) ? `${roleName(id)} — managed elsewhere` : roleName(id),
+      }))
+
   const staff = employees.filter((e) => {
     if (zoneFilter !== 'all' && e.zoneId !== zoneFilter) return false
     if (zoneFilter === 'all' && scopeZone !== 'all' && e.zoneId !== scopeZone) return false
@@ -367,7 +384,7 @@ export function SettingsView() {
 
   const buildMenu = (e: EmployeeRow): RowMenuItem[] => [
     { icon: Eye, label: 'View profile', onClick: () => setViewTarget(e) },
-    { icon: Pencil, label: 'Edit profile', onClick: () => { setEditTarget(e); setEditDraft({ title: e.title, email: e.email, payrollNo: e.payrollNo, positionId: e.positionId, departmentId: e.departmentId, zoneId: e.zoneId, gender: e.gender ?? 'M', hireDate: e.hireDate, roleIds: [...new Set(e.roleIds ?? [])], password: '' }) } },
+    { icon: Pencil, label: 'Edit profile', onClick: () => { setEditTarget(e); setEditDraft({ name: e.name, title: e.title, email: e.email, payrollNo: e.payrollNo, positionId: e.positionId, departmentId: e.departmentId, zoneId: e.zoneId, gender: e.gender ?? 'M', hireDate: e.hireDate, roleIds: [...new Set(e.roleIds ?? [])], password: '' }) } },
     {
       icon: Power,
       label: e.active ? 'Deactivate' : 'Activate',
@@ -386,10 +403,25 @@ export function SettingsView() {
       : []),
   ]
 
-  const saveEdit = () => {
+  const saveEdit = async () => {
     if (!editTarget) return
-    updateEmployee(editTarget.id, { email: editDraft.email, payrollNo: editDraft.payrollNo, positionId: editDraft.positionId, departmentId: editDraft.departmentId, zoneId: editDraft.zoneId, gender: editDraft.gender, hireDate: editDraft.hireDate, roleIds: editDraft.roleIds, ...(editDraft.password ? { password: editDraft.password } : {}) })
-    setEditTarget(null)
+    const name = editDraft.name.trim()
+    if (!name) {
+      toast.error('Full name cannot be empty.')
+      return
+    }
+    const held = editTarget.roleIds ?? []
+    const blockedAdd = editDraft.roleIds.find((id) => NON_ASSIGNABLE_ROLES.has(id) && !held.includes(id))
+    if (blockedAdd) {
+      toast.error(`${roleName(blockedAdd)} cannot be assigned here. Final Authority is appointed by migration; department and zone heads are appointed from their unit pages.`)
+      return
+    }
+    if (held.includes('FINAL_AUTHORITY') && !editDraft.roleIds.includes('FINAL_AUTHORITY')) {
+      toast.error('Final Authority cannot be removed here — it is managed by migration only.')
+      return
+    }
+    const ok = await updateEmployee(editTarget.id, { name, email: editDraft.email, payrollNo: editDraft.payrollNo, positionId: editDraft.positionId, departmentId: editDraft.departmentId, zoneId: editDraft.zoneId, gender: editDraft.gender, hireDate: editDraft.hireDate, roleIds: editDraft.roleIds, ...(editDraft.password ? { password: editDraft.password } : {}) })
+    if (ok) setEditTarget(null)
   }
 
   const matrix = matrixDraft ?? rolePermissions
@@ -1549,9 +1581,9 @@ export function SettingsView() {
             </SelectInput>
             <MultiSelect
               label="Employee roles"
-              hint="Roles belong to the employee and are assigned here; positions do not grant roles."
+              hint="Roles belong to the employee and are assigned here; positions do not grant roles. Final Authority is migration-appointed, and department/zone heads are appointed from their unit pages."
               placeholder="Select approval roles…"
-              options={allRoleIds.map((r) => ({ value: r, label: roleName(r) }))}
+              options={rolePickerOptions()}
               value={regDraft.role_ids}
               onChange={(next) => setRegDraft((d) => ({ ...d, role_ids: next }))}
             />
@@ -1715,13 +1747,21 @@ export function SettingsView() {
         subtitle="Profile updates are written to the audit trail."
         size="md"
         footer={
-          <Btn onClick={saveEdit}>
+          <Btn onClick={saveEdit} disabled={!editDraft.name.trim()}>
             <Save className="w-3.5 h-3.5" /> Save changes
           </Btn>
         }
       >
         <div className="space-y-4">
-          <TextInput label="Full name" value={editTarget?.name ?? ''} readOnly className="opacity-60" />
+          <TextInput
+            label="Full name"
+            value={editDraft.name}
+            onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })}
+            placeholder="First middle last"
+            maxLength={120}
+            required
+          />
+          <p className="-mt-2 text-[10px] text-muted-foreground">Changing the name updates the staff display name, its first/middle/last parts and the avatar initials across the system.</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             <TextInput label="Payroll no." value={editDraft.payrollNo} onChange={(e) => setEditDraft({ ...editDraft, payrollNo: e.target.value })} placeholder="DPP-1001" />
             <TextInput label="Work email" value={editDraft.email} onChange={(e) => setEditDraft({ ...editDraft, email: e.target.value })} placeholder="name@dpp.go.tz" />
@@ -1757,13 +1797,13 @@ export function SettingsView() {
           <TextInput label="New password" type="password" value={editDraft.password} onChange={(e) => setEditDraft({ ...editDraft, password: e.target.value })} placeholder="Leave blank to keep the current one" autoComplete="new-password" />
           <MultiSelect
             label="Approval roles"
-            hint="Unconditional roles are replaced on save; department/zone scoped heads are managed separately."
+            hint="Unconditional roles are replaced on save. Final Authority is migration-appointed and department/zone heads are appointed from their unit pages — they appear here only when already held."
             placeholder="Select approval roles…"
-            options={allRoleIds.map((r) => ({ value: r, label: roleName(r) }))}
+            options={rolePickerOptions(editTarget?.roleIds ?? [])}
             value={editDraft.roleIds}
             onChange={(next) => setEditDraft((d) => ({ ...d, roleIds: next }))}
           />
-          <p className="text-[10px] text-muted-foreground">Full name is managed by HR records; the position drives the job title shown across the system.</p>
+          <p className="text-[10px] text-muted-foreground">The position drives the job title shown across the system; approval roles control what this person can approve.</p>
         </div>
       </Modal>
 

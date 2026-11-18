@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   FolderKanban,
   FolderOpen,
@@ -24,6 +24,7 @@ import {
   pendingHandoversFor,
 } from '@/lib/leave'
 import { useLeave } from '@/components/leave/leave-context'
+import { leaveApi, type PendingHandoverDto } from '@/lib/leave-api'
 import {
   Avatar,
   TypePill,
@@ -48,6 +49,37 @@ import { RequestDetail } from '@/components/leave/request-detail'
 export function CasesView() {
   const { cases, handovers, requests, employees, employeeId, recordHandover, acceptHandover, rejectHandover, closeCase, caseOf, can } = useLeave()
   const [tab, setTab] = useState('cases')
+  const [pendingMine, setPendingMine] = useState<PendingHandoverDto[]>([])
+  const [pendingMineLoaded, setPendingMineLoaded] = useState(false)
+
+  // Handovers addressed to *me* across every request — with the default
+  // case list this inbox is otherwise invisible until the case lands on my
+  // desk. Independent of the docket rows below.
+  const loadPendingMine = useCallback(async () => {
+    try {
+      const res = await leaveApi.handovers.pendingMine()
+      setPendingMine(res.data ?? [])
+    } catch {
+      setPendingMine([])
+    } finally {
+      setPendingMineLoaded(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadPendingMine()
+  }, [loadPendingMine])
+
+  const actPending = useCallback(
+    (h: PendingHandoverDto, accept: boolean) => {
+      if (accept) acceptHandover(String(h.id))
+      else rejectHandover(String(h.id), 'Declined by proposed owner.')
+      // Drop the row immediately; the context refresh + a delayed reload sync the rest.
+      setPendingMine((prev) => prev.filter((x) => x.id !== h.id))
+      window.setTimeout(() => void loadPendingMine(), 800)
+    },
+    [acceptHandover, rejectHandover, loadPendingMine],
+  )
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [docFilter, setDocFilter] = useState('all')
@@ -143,6 +175,7 @@ export function CasesView() {
       <Tabs
         tabs={[
           { value: 'cases', label: 'Cases & docket state', icon: FolderKanban, badge: rows.length },
+          { value: 'awaiting', label: 'Kesi zinazokusubiri · Awaiting you', icon: Inbox, badge: pendingMine.length },
           { value: 'how', label: 'How docket continuity works', icon: BookOpen },
         ]}
         value={tab}
@@ -282,6 +315,57 @@ export function CasesView() {
           </div>
         )}
         <Pagination page={paged.page} pageSize={paged.size} total={paged.total} onPage={paged.setPage} onPageSize={paged.setSize} />
+      </Panel>
+      )}
+
+      {tab === 'awaiting' && (
+      <Panel
+        title="Kesi zinazokusubiri — cases awaiting your acceptance"
+        subtitle={pendingMineLoaded ? `${pendingMine.length} handover${pendingMine.length === 1 ? '' : 's'} proposed to you across all requests` : 'Inapakia…'}
+      >
+        {pendingMine.length === 0 ? (
+          <EmptyState
+            title={pendingMineLoaded ? 'Hakuna kesi zinazokusubiri' : 'Inapakia kesi zinazokusubiri…'}
+            hint={pendingMineLoaded ? 'When a colleague proposes a case handover to you, it shows up here — even before the leave request reaches your desk.' : 'Loading pending handovers…'}
+          />
+        ) : (
+          <ul className="divide-y divide-border">
+            {pendingMine.map((h) => (
+              <li key={h.id} className="py-4 flex flex-col sm:flex-row sm:items-center gap-3">
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-[13px] font-bold text-foreground">{h.case_ref ?? `#${h.case_id}`}</span>
+                    {h.next_hearing_date && (
+                      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                        <CalendarClock className="w-3 h-3" /> Kesi: {fmtShort(h.next_hearing_date)}
+                      </span>
+                    )}
+                    <span className="rounded-full border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-800 dark:text-amber-300">
+                      Inasubiri · Pending
+                    </span>
+                  </div>
+                  <p className="text-[12px] text-foreground">
+                    <span className="text-muted-foreground">Ombi / request: </span>
+                    <span className="font-semibold">{h.request_ref ?? `#${h.request_id}`}</span>
+                    {h.requester_name && <span className="text-muted-foreground"> · mwombaji {h.requester_name}</span>}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Kabidhi kutoka: {h.from_name ?? '—'}{h.proposed_at ? ` · ${fmtShort(h.proposed_at)}` : ''}
+                  </p>
+                  {h.reason && <p className="text-[11px] text-foreground/80 italic">“{h.reason}”</p>}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Btn variant="emerald" onClick={() => actPending(h, true)}>
+                    <Check className="w-3.5 h-3.5" /> Kubali · Accept
+                  </Btn>
+                  <Btn variant="outline" onClick={() => actPending(h, false)}>
+                    <X className="w-3.5 h-3.5" /> Kataa · Decline
+                  </Btn>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </Panel>
       )}
 

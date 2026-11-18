@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ShieldCheck, Clock, FileText, Lock, CheckCircle, Printer, MailOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -14,6 +14,8 @@ import {
 import { Avatar, StatusPill, TypePill, Modal, Btn } from '@/components/leave/shared'
 import { useLeave } from '@/components/leave/leave-context'
 import { LetterView, printLetter } from '@/components/leave/letter-view'
+import { HandoverPanel } from '@/components/leave/handover-panel'
+import { leaveApi, type SignatureSeal, type ChainItem } from '@/lib/leave-api'
 
 const STEP_TONE: Record<string, { dot: string; text: string; bg: string }> = {
   approved: { dot: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-950/40' },
@@ -24,11 +26,12 @@ const STEP_TONE: Record<string, { dot: string; text: string; bg: string }> = {
   pending: { dot: 'bg-zinc-400', text: 'text-muted-foreground', bg: 'bg-muted/40' },
 }
 
-export function RequestDetail({ request, isHr = false }: { request: LeaveRequest; isHr?: boolean }) {
+export function RequestDetail({ request, isHr = false, actions }: { request: LeaveRequest; isHr?: boolean; actions?: ReactNode }) {
   // The employee, leave type and policy all live in the database now. A row
   // can be missing (a deleted staff member, a removed leave type, a type with
   // no published policy) — render gracefully instead of throwing in render.
-  const emp = getEmployee(request.employeeId)
+  const { employees } = useLeave()
+  const emp = employees.find((e) => e.id === request.employeeId) ?? getEmployee(request.employeeId)
   const policy = policyEffectiveAt(request.leaveTypeId, request.submittedAt ?? request.createdAt)
   const zone = emp ? getZone(emp.zoneId) : undefined
   const dept = emp ? getDept(emp.departmentId) : undefined
@@ -36,6 +39,28 @@ export function RequestDetail({ request, isHr = false }: { request: LeaveRequest
 
   const [showLetter, setShowLetter] = useState(false)
   const letterHostRef = useRef<HTMLDivElement>(null)
+  // Approval signature seals for this request — fetched lazily when the
+  // letter is first opened. Seals are per-decision; the letter matches
+  // them to signers by employee id. A caller without read access simply
+  // sees the blank signature rules (same as before signatures existed).
+  const [signatures, setSignatures] = useState<SignatureSeal[]>([])
+  // Resolved chain, used by the letter only before the first decision is
+  // recorded (no persisted assignment rows exist yet at that point).
+  const [chain, setChain] = useState<ChainItem[]>([])
+
+  useEffect(() => {
+    if (!showLetter) return
+    let cancelled = false
+    leaveApi.requests
+      .signaturesFor(request.id)
+      .then((res) => { if (!cancelled) setSignatures(res.data) })
+      .catch(() => { if (!cancelled) setSignatures([]) })
+    leaveApi.requests
+      .workflow(request.id)
+      .then((res) => { if (!cancelled) setChain(res.data) })
+      .catch(() => { if (!cancelled) setChain([]) })
+    return () => { cancelled = true }
+  }, [showLetter, request.id])
 
   const printLetterNow = () => {
     const page = letterHostRef.current?.querySelector<HTMLElement>('.letter-page')
@@ -44,8 +69,10 @@ export function RequestDetail({ request, isHr = false }: { request: LeaveRequest
 
   return (
     <div className="space-y-5">
-      {/* Swahili application letter — screen view + isolated-iframe print */}
-      {(request.status === 'approved' || request.status === 'rejected') && <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-warm dark:bg-muted/30 px-3.5 py-2.5">
+      {/* Swahili application letter — screen view + isolated-iframe print.
+          Visible to everyone who can see the request; before a decision it
+          renders with the INASUBIRI (pending) stamp. */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-warm dark:bg-muted/30 px-3.5 py-2.5">
         <div className="flex items-center gap-1.5 min-w-0">
           <MailOpen className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           <p className="text-[11px] text-muted-foreground truncate">
@@ -55,7 +82,7 @@ export function RequestDetail({ request, isHr = false }: { request: LeaveRequest
         <Btn variant="outline" onClick={() => setShowLetter(true)}>
           <FileText className="h-3.5 w-3.5" /> Angalia barua
         </Btn>
-      </div>}
+      </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="col-span-2 rounded-xl border border-border bg-secondary/50 p-3.5">
@@ -98,6 +125,8 @@ export function RequestDetail({ request, isHr = false }: { request: LeaveRequest
           <p className="text-sm font-semibold text-foreground mt-0.5">{request.submittedAt ? fmtShort(request.submittedAt) : '—'}</p>
         </div>
       </div>
+
+      <HandoverPanel request={request} />
 
       <div className="rounded-xl border border-border p-4">
         <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold mb-2">Reason</p>
@@ -155,12 +184,12 @@ export function RequestDetail({ request, isHr = false }: { request: LeaveRequest
                     </span>
                   </div>
                   <p className="text-[12px] text-muted-foreground mt-0.5">
-                    {s.assigneeName} {s.via !== 'direct' && <span className="text-amber-600 dark:text-amber-400">(via delegation: {s.via})</span>}
+                    {s.assigneeName} {s.via === 'delegation' && <span className="text-amber-600 dark:text-amber-400">(via delegation)</span>}
                     {' · '}Due {fmtShort(s.dueAt)}
                   </p>
                   {s.comments && (
-                    <p className="text-[12px] text-foreground mt-1.5 border-t border-border/60 pt-1.5">
-                      <span className="text-muted-foreground">Comment: </span>{s.comments}
+                    <p className="text-[12px] text-foreground mt-1.5 border-t border-border/60 pt-1.5 whitespace-pre-wrap">
+                      <span className="text-muted-foreground">Maoni ya mwidhinishaji / Decision comment: </span>{s.comments}
                     </p>
                   )}
                   {s.actedAt && <p className="text-[11px] text-muted-foreground mt-1">Acted {fmtShort(s.actedAt)}</p>}
@@ -194,6 +223,14 @@ export function RequestDetail({ request, isHr = false }: { request: LeaveRequest
         </div>
       )}
 
+      {/* Decision actions (Kubali / Irudishe / Kataa) pinned to the bottom of
+          the modal so the chain reads, then the approver decides. */}
+      {actions ? (
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-4">
+          {actions}
+        </div>
+      ) : null}
+
       <Modal
         open={showLetter}
         onClose={() => setShowLetter(false)}
@@ -212,7 +249,7 @@ export function RequestDetail({ request, isHr = false }: { request: LeaveRequest
         }
       >
         <div ref={letterHostRef} className="overflow-x-auto pb-1">
-          <LetterView request={request} />
+          <LetterView request={request} signatures={signatures} chain={chain} />
         </div>
       </Modal>
     </div>

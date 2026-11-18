@@ -67,6 +67,8 @@ import {
 } from '@/components/leave/shared'
 import { RequestDetail } from '@/components/leave/request-detail'
 import { ApprovalModal } from '@/components/leave/approval-modal'
+import { PreviousDecisions } from '@/components/leave/previous-decisions'
+import { ApprovalInsightBoxes } from '@/components/leave/approval-insight-boxes'
 
 interface PartState {
   employeeId: string
@@ -183,9 +185,11 @@ export function RequestsView() {
   const [signatureData, setSignatureData] = useState<{ path: string | null; hash: string | null }>({ path: null, hash: null })
   const [approvalInsight, setApprovalInsight] = useState<ApprovalInsight | null>(null)
   const [approvalInsightLoading, setApprovalInsightLoading] = useState(false)
+  const [approveComment, setApproveComment] = useState('')
   const resetSignature = () => {
     setSignatureStep('pending')
     setSignatureData({ path: null, hash: null })
+    setApproveComment('')
   }
 
   useEffect(() => {
@@ -933,8 +937,8 @@ export function RequestsView() {
       <Modal
         open={approveTarget !== null}
         onClose={() => { setApproveTarget(null); resetSignature() }}
-        title={approveTarget ? `Approve ${approveTarget.request.ref}` : 'Approve request'}
-        subtitle={approveTarget?.isFinalStep ? 'Final approver sets the return date and granted leave duration.' : 'Record your decision. The final approver will set the return date and duration.'}
+        title={approveTarget ? `Idhinisha / Approve ${approveTarget.request.ref}` : 'Approve request'}
+        subtitle={approveTarget?.isFinalStep ? 'Mwidhinishaji wa mwisho huweka tarehe ya kurudi kazini na muda wa likizo. / The final approver sets the return date and granted duration.' : 'Rekodi uamuzi wako — tarehe ya kurudi na muda zinahifadhiwa kwa mwidhinishaji wa mwisho. / Record your decision.'}
         size="md"
         footer={
           signatureStep === 'completed' ? (
@@ -944,7 +948,7 @@ export function RequestsView() {
               disabled={approveTarget?.isFinalStep === true && !approveReturnDate}
               onClick={() => {
                 if (!approveTarget) return
-                decide(approveTarget.request.id, approveTarget.stepOrder, 'approved', '(approved)', approveTarget.isFinalStep ? approveReturnDate : undefined, signatureData.path ?? undefined, signatureData.hash ?? undefined)
+                decide(approveTarget.request.id, approveTarget.stepOrder, 'approved', approveComment.trim() || undefined, approveTarget.isFinalStep ? approveReturnDate : undefined, signatureData.path ?? undefined, signatureData.hash ?? undefined)
                 resetSignature()
                 setApproveTarget(null)
               }}
@@ -974,46 +978,48 @@ export function RequestsView() {
             />
             {signatureStep === 'completed' && (
           <div className="space-y-4">
+            <PreviousDecisions steps={approveTarget.request.steps} />
             <div className="rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2.5">
               <p className="text-[12px] font-semibold text-foreground">
-                {typeOf(approveTarget.request.leaveTypeId)?.name} — proposed from {fmtShort(approveTarget.request.startDate)}
+                {typeOf(approveTarget.request.leaveTypeId)?.name} — imependekezwa kuanzia {fmtShort(approveTarget.request.startDate)}
               </p>
               <p className="text-[11px] text-muted-foreground mt-0.5">
-                {approveTarget.request.reason || 'No reason given.'}
+                {approveTarget.request.reason || 'Hakuna sababu iliyotolewa. / No reason given.'}
               </p>
             </div>
             {approveTarget.isFinalStep ? (
               <>
                 <TextInput
                   type="date"
-                  label="Return to work date"
-                  hint="The day the employee resumes duty; leave days are counted up to the day before this date."
+                  label="Tarehe ya kurudi kazini"
+                  hint="Siku ambayo mfanyakazi anarudi kazini — siku za likizo huhesabiwa hadi siku inayotangulia."
                   value={approveReturnDate}
                   onChange={(e) => setApproveReturnDate(e.target.value)}
                 />
                 <p className="text-[12px] font-mono text-foreground">
-                  {approveReturnDate ? `≈ ${fmtShort(approveTarget.request.startDate)} → ${fmtShort(approveReturnDate)} · ${approvalProposedDays} day${approvalProposedDays === 1 ? '' : 's'}` : 'Set the return date to grant leave.'}
+                  {approveReturnDate ? `≈ ${fmtShort(approveTarget.request.startDate)} → ${fmtShort(approveReturnDate)} · siku ${approvalProposedDays}` : 'Weka tarehe ya kurudi ili kutoa likizo.'}
                 </p>
-                {(approvalInsight?.annual_balance ?? approvalAnnualBalance) && (
-                  <div className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-[12px] text-teal-900 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-200">
-                    Shared annual balance: {(approvalInsight?.annual_balance ?? approvalAnnualBalance)!.remaining} days before this request; approximately {Math.max(0, (approvalInsight?.annual_balance ?? approvalAnnualBalance)!.remaining - approvalProposedDays)} after approval. Approved days from all leave types count in this service year.
-                  </div>
-                )}
-                {approveTarget.request.leaveTypeId === annualTypeId && (
-                  <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12px] text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200">
-                    {approvalInsightLoading
-                      ? 'Checking the employee’s annual payment cycle…'
-                      : approvalInsight?.annual_request_number
-                        ? `Annual request #${approvalInsight.annual_request_number} this service year. ${approvalInsight.payment_eligible ? 'Eligible for HR payment review after approval.' : 'Not eligible for payment review in the every-second-request cycle.'}`
-                        : 'Payment-cycle insight is unavailable; HR can check eligibility after approval.'}
-                  </div>
-                )}
               </>
             ) : (
               <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12px] text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200">
-                This is an intermediate approval step. The return date and granted days are reserved for the final approver.
+                Hatua ya kati ya kuidhinisha. Tarehe ya kurudi na siku zilizopewa zinahifadhiwa kwa mwidhinishaji wa mwisho.
               </p>
             )}
+            <ApprovalInsightBoxes
+              insight={approvalInsight}
+              loading={approvalInsightLoading}
+              isFinalStep={approveTarget.isFinalStep}
+              isAnnual={approveTarget.request.leaveTypeId === annualTypeId}
+              proposedDays={approvalProposedDays}
+              fallbackBalance={approvalAnnualBalance}
+            />
+            <TextArea
+              label="Maoni ya uamuzi (yanahifadhiwa)"
+              value={approveComment}
+              onChange={(e) => setApproveComment(e.target.value)}
+              rows={2}
+              placeholder="Maoni ya hiari kwa mwombaji…"
+            />
           </div>
             )}
           </>

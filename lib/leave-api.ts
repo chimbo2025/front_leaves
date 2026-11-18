@@ -287,6 +287,8 @@ export interface WorkflowStepDto {
   /** Legacy pointer kept for pre-catalog consumers; routing reads approval_role_id. */
   role_required: string | null
   approval_role_id: string | null
+  /** Employee explicitly chosen for this step (new builder). */
+  approver_employee_id: string | null
   fallback_approval_role_id: string | null
   assignment_mode: WorkflowAssignmentMode
   scope_type: WorkflowStepScope
@@ -296,6 +298,7 @@ export interface WorkflowStepDto {
   escalation_after_sla: boolean
   note: string | null
   approval_role?: ApprovalRoleDto | null
+  approver?: EmployeeDto | null
 }
 
 export interface WorkflowDefDto {
@@ -335,6 +338,8 @@ export interface WorkflowDefDto {
 export interface WorkflowStepInput {
   /** Catalog role id — the backend derives the legacy role pointer itself. */
   approval_role_id: string
+  /** Employee chosen from the holders of approval_role_id. */
+  approver_employee_id?: string | null
   fallback_approval_role_id?: string | null
   assignment_mode?: WorkflowAssignmentMode
   scope_type?: WorkflowStepScope
@@ -360,6 +365,8 @@ export interface WorkflowStoreInput {
   effective_to?: string | null
   notes?: string | null
   is_active?: boolean
+  /** New builder contract: every step must name an approver. */
+  strict_approvers?: boolean
   steps: WorkflowStepInput[]
 }
 
@@ -394,6 +401,8 @@ export interface WorkflowCheckStep {
   step_order: number
   approval_role_id: string | null
   approval_role_name: string | null
+  approver_employee_id: string | null
+  approver_name: string | null
   assignment_mode: WorkflowAssignmentMode
   scope_type: WorkflowStepScope
   is_mandatory: boolean
@@ -416,13 +425,24 @@ export interface WorkflowCheckResult {
 // ---------------------------------------------------------------------------
 export interface RequestAssignment {
   id: number
+  /** Configured workflow step this assignment belongs to. */
+  step_id?: number | null
   role: string
+  /** Catalog display name (e.g. "HR Reviewer"); falls back to `role`. */
+  role_label?: string | null
   assignee_id: string | null
   assignee_name: string | null
   assignee_initials?: string | null
+  /** `delegation` when this step was routed through an active delegation. */
+  via?: string
+  delegated_from_id?: string | null
   status: 'pending' | 'queued' | 'done' | 'skipped'
   due_at: string | null
   decided_at: string | null
+  /** Latest decision on the assignment (approved/returned/rejected). */
+  decision?: 'approved' | 'returned' | 'rejected' | null
+  /** Comment recorded with that decision — shown to the current approver. */
+  decision_comment?: string | null
 }
 
 export interface RequestCompact {
@@ -477,15 +497,38 @@ export interface RequestDto {
   signature_hash?: string
 }
 
+export interface SignatureSeal {
+  id: number
+  /** Employee id of the signer — matches step.assigneeId on the chain. */
+  actor_id: string
+  actor_name: string | null
+  approval_action: 'approved' | 'rejected' | 'returned'
+  signature_type: 'digital' | 'wet_ink_reference'
+  signature_hash: string
+  signature_hash_prefix: string
+  signed_at: string | null
+  /** Stored ceremony image as a base64 data URL; null for seals without one. */
+  image_data_url: string | null
+}
+
 export interface WorkflowAssignmentRaw {
   id: number
   request_id: number
   step_id: number
   assigned_employee_id: string | null
   assigned_role_id: string
+  /** Catalog display name appended by the API (e.g. "HR Reviewer"). */
+  role_label?: string | null
+  /** `delegation` when the step was routed through a delegation. */
+  via?: string
+  delegated_from_employee_id?: string | null
   status: 'pending' | 'queued' | 'done' | 'skipped'
   due_at: string | null
   decided_at: string | null
+  /** Latest decision on the assignment (approved/returned/rejected). */
+  decision?: 'approved' | 'returned' | 'rejected' | null
+  /** Comment recorded with that decision — shown to the current approver. */
+  decision_comment?: string | null
   assignee?: EmployeeDto | null
 }
 
@@ -506,6 +549,18 @@ export interface ApprovalInsight {
   annual_balance: { accrued: number; used: number; remaining: number; carryOver: number } | null
   annual_request_number: number | null
   payment_eligible: boolean
+  balance_breakdown?: BalanceBreakdown | null
+}
+
+export interface BalanceBreakdown {
+  service_year_start: string
+  service_year_end: string
+  earned: number
+  carry_over: number
+  used: number
+  remaining: number
+  used_by_type: { code: string | null; name: string | null; days: number }[]
+  ledger_rows: { transaction_type: string; direction: string; amount: number; reason_code: string | null; reason: string | null; created_at: string | null }[]
 }
 
 export interface DecideResponse {
@@ -638,7 +693,21 @@ export interface HandoverDto {
 
 export interface HandoverIndexResponse {
   data: HandoverDto[]
-  missing: { empty: boolean; refs: string[] }
+  missing: { empty: boolean; refs: string[]; cases?: { id: number; ref: string; next_hearing_date: string | null }[] }
+}
+
+export interface PendingHandoverDto {
+  id: number
+  case_id: number
+  case_ref: string | null
+  case_kind: string | null
+  next_hearing_date: string | null
+  request_id: number
+  request_ref: string | null
+  requester_name: string | null
+  from_name: string | null
+  reason: string | null
+  proposed_at: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -1047,8 +1116,10 @@ export const leaveApi = {
       request<{ data: RequestCompact; workflow: ChainItem[] }>(`/requests/${id}/submit`, { method: 'POST' }),
     resubmit: (id: number | string) =>
       request<{ data: RequestCompact; workflow: ChainItem[] }>(`/requests/${id}/resubmit`, { method: 'POST' }),
-    decide: (id: number | string, body: { decision: 'approved' | 'rejected' | 'returned'; comments?: string; end_date?: string | null; signature_path?: string; signature_hash?: string }) =>
+    decide: (id: number | string, body: { decision: 'approved' | 'rejected' | 'returned'; comments?: string; end_date?: string | null; signature_hash?: string; signature_image?: string | null }) =>
       request<DecideResponse>(`/requests/${id}/decide`, { method: 'POST', body: JSON.stringify(body) }),
+    /** Approval signature seals for the letter — one per recorded decision, with the stored ceremony image inlined as a data URL. */
+    signaturesFor: (id: number | string) => request<{ data: SignatureSeal[] }>(`/requests/${id}/signatures`),
     withdraw: (id: number | string, body: { reason?: string } = {}) =>
       request<{ data: RequestDto }>(`/requests/${id}/withdraw`, { method: 'POST', body: JSON.stringify(body) }),
     /** Hard delete — drafts only; the API keeps submitted history forever. */
@@ -1099,6 +1170,9 @@ export const leaveApi = {
         })}`,
       ),
     get: (id: string) => request<{ data: WorkflowDefDto }>(`/workflows/${id}`),
+    /** Employees holding an approval role, for the step's approver dropdown. */
+    roleHolders: (approvalRoleId: string) =>
+      request<{ data: EmployeeDto[] }>(`/workflows/role-holders/${encodeURIComponent(approvalRoleId)}`),
     /** Dry-run for the live preview: coverage, resolved chain, overlap warning. */
     check: (body: WorkflowCheckInput) =>
       request<{ data: WorkflowCheckResult }>('/workflows/check', { method: 'POST', body: JSON.stringify(body) }),
@@ -1123,8 +1197,9 @@ export const leaveApi = {
 
   handovers: {
     list: (requestId: number | string) => request<HandoverIndexResponse>(`/handovers/${requestId}`),
-    propose: (requestId: number | string, body: { to_employee_id: string; case_ids?: number[] }) =>
+    propose: (requestId: number | string, body: { to_employee_id: string; case_ids?: number[]; reason?: string }) =>
       request<{ data: HandoverDto[] }>(`/handovers/${requestId}/propose`, { method: 'POST', body: JSON.stringify(body) }),
+    pendingMine: () => request<{ data: PendingHandoverDto[] }>('/handovers/pending-mine'),
     accept: (handoverId: number, notes?: string) =>
       request<{ data: HandoverDto }>(`/handovers/${handoverId}/accept`, { method: 'POST', body: JSON.stringify({ notes }) }),
     reject: (handoverId: number, notes?: string) =>
