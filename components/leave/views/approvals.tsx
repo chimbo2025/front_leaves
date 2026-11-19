@@ -388,7 +388,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                           )}
                         </td>
                         <td className="py-3 px-3"><StatusPill status={r.status as Status} /></td>
-                        <td className="py-3 px-3 text-right text-[11px] font-mono text-muted-foreground whitespace-nowrap">{r.steps.filter((s) => s.status === 'approved').length}/{r.steps.length} approved</td>
+                        <td className="py-3 px-3 text-right text-[11px] font-mono text-muted-foreground whitespace-nowrap">{r.steps.filter((s) => (s.decision ?? s.status) === 'approved').length}/{r.steps.length} approved</td>
                         <td className="py-3 px-3 text-right" onClick={(e) => e.stopPropagation()}>
                           <RowMenu items={buildMenu(r)} align="right" label="Manage" />
                         </td>
@@ -397,8 +397,16 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                         <tr className="align-top">
                           <td colSpan={8} className="px-5 pb-4 border-t border-border">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-3">
-                              {r.steps.map((s, i) => (
-                                <div key={i} className={cn('rounded-xl border px-3 py-2.5', STEP_STYLE[s.status])}>
+                              {r.steps.map((s, i) => {
+                                // `done` assignments are mapped to "approved";
+                                // the real outcome is on the decision, so use it
+                                // for the token and colour (a rejection must not
+                                // read as an approval).
+                                const state = s.decision === 'rejected' || s.decision === 'returned' || s.decision === 'approved'
+                                  ? s.decision
+                                  : s.status
+                                return (
+                                <div key={i} className={cn('rounded-xl border px-3 py-2.5', STEP_STYLE[state])}>
                                   <div className="flex items-center gap-2 mb-1.5">
                                     <span className="text-[11px] font-mono text-muted-foreground">{i + 1}</span>
                                     <Avatar id={s.assigneeId} size="sm" />
@@ -408,16 +416,17 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                                         {s.roleLabel}{s.via === 'delegation' ? ' · via delegation' : ''}
                                       </p>
                                     </div>
-                                    <span className={cn('text-[10px] font-bold uppercase tracking-wide', stepTokenColor(s.status))}>{s.status}</span>
+                                    <span className={cn('text-[10px] font-bold uppercase tracking-wide', stepTokenColor(state))}>{state}</span>
                                   </div>
                                   <p className="text-[11px] text-muted-foreground leading-snug">{s.comments}</p>
                                   <div className="flex items-center gap-2 mt-1.5 text-[10px] text-muted-foreground">
                                     <DateChip date={s.dueAt} />
                                     {s.actedAt && <span>acted {fmt(s.actedAt)}</span>}
-                                    {s.dueAt < TODAY && s.status === 'pending' && <span className="text-amber-600 font-semibold">SLA exceeded</span>}
+                                    {s.dueAt < TODAY && state === 'pending' && <span className="text-amber-600 font-semibold">SLA exceeded</span>}
                                   </div>
                                 </div>
-                              ))}
+                                )
+                              })}
                             </div>
                           </td>
                         </tr>

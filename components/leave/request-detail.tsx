@@ -185,7 +185,14 @@ export function RequestDetail({ request, isHr = false, actions }: { request: Lea
         </div>
         <ol className="space-y-0">
           {request.steps.map((s, idx) => {
-            const tone = STEP_TONE[s.status] ?? STEP_TONE.pending
+            // An assignment is always stored `done` once acted on; the real
+            // outcome (approved / returned / rejected) lives on the decision.
+            // Prefer it so a rejected step is not rendered as "approved" and
+            // its reason is not hidden from the requester.
+            const state = s.decision === 'rejected' || s.decision === 'returned' || s.decision === 'approved'
+              ? s.decision
+              : s.status
+            const tone = STEP_TONE[state] ?? STEP_TONE.pending
             return (
               <li key={s.order} className="relative pl-6 pb-5 last:pb-0">
                 {idx < request.steps.length - 1 && <span className="absolute left-[9px] top-5 bottom-0 w-px bg-border" />}
@@ -194,19 +201,19 @@ export function RequestDetail({ request, isHr = false, actions }: { request: Lea
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-[13px] font-semibold text-foreground">{s.roleLabel}</p>
                     <span className={cn('text-[11px] font-semibold uppercase tracking-wide', tone.text)}>
-                      {s.status.toUpperCase().replace('_', ' ')}
+                      {state.toUpperCase().replace('_', ' ')}
                     </span>
                   </div>
                   <p className="text-[12px] text-muted-foreground mt-0.5">
                     {s.assigneeName} {s.via === 'delegation' && <span className="text-amber-600 dark:text-amber-400">(via delegation)</span>}
                     {' · '}Due {fmtShort(s.dueAt)}
                   </p>
-                  {s.comments && (employeeId !== request.employeeId || s.status === 'returned' || s.status === 'rejected') && (
+                  {s.comments && (employeeId !== request.employeeId || state === 'returned' || state === 'rejected') && (
                     <p className="text-[12px] text-foreground mt-1.5 border-t border-border/60 pt-1.5 whitespace-pre-wrap">
                       <span className="text-muted-foreground">
-                        {s.status === 'rejected'
+                        {state === 'rejected'
                           ? 'Sababu ya kukataa / Reason for rejection: '
-                          : s.status === 'returned'
+                          : state === 'returned'
                             ? 'Sababu ya kurudisha / Reason for return: '
                             : 'Maoni ya mwidhinishaji / Decision comment: '}
                       </span>{s.comments}

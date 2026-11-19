@@ -71,6 +71,13 @@ export function LetterView({ request, signatures = [], chain = [] }: { request: 
     ['Malipo', request.isPaid === false ? 'Bila malipo / Unpaid' : request.isPaid === true ? 'Inalipwa / Paid' : '—'],
   ]
 
+  // A step's assignment is stored `done` once acted on, which the compact
+  // mapper renders as "approved". The real outcome lives on the decision, so
+  // resolve it here before folding rows or printing a status stamp - otherwise
+  // a rejected signature reads as an approval on the letter.
+  const stepState = (s: ApprovalStep): string =>
+    s.decision === 'rejected' || s.decision === 'returned' || s.decision === 'approved' ? s.decision : s.status
+
   // The distinct approval sign-offs: collapse repeated assignees into one row,
   // in first-appearance order. A person is IMEIDHINISHWA only once every step
   // of theirs is decided; any open step leaves them INASUBIRI.
@@ -91,9 +98,10 @@ export function LetterView({ request, signatures = [], chain = [] }: { request: 
       // Fold the later step into the same row: a step pending on them right now
       // wins (they still owe a signature), then rejected, else approved. Queued
       // (not-yet-reached) steps carry no decision and never downgrade a row.
-      if (s.status === 'pending') row.status = 'pending'
-      else if (s.status === 'rejected' && row.status !== 'pending') row.status = 'rejected'
-      else if (s.status === 'returned' && row.status !== 'pending' && row.status !== 'rejected') row.status = 'returned'
+      const st = stepState(s)
+      if (st === 'pending') row.status = 'pending'
+      else if (st === 'rejected' && row.status !== 'pending') row.status = 'rejected'
+      else if (st === 'returned' && row.status !== 'pending' && row.status !== 'rejected') row.status = 'returned'
       if (s.actedAt && (!row.actedAt || s.actedAt > row.actedAt)) row.actedAt = s.actedAt
     }
   }
@@ -106,9 +114,10 @@ export function LetterView({ request, signatures = [], chain = [] }: { request: 
   }
 
   const approverState = (s: ApprovalStep): { label: string; color: string } => {
-    if (s.status === 'approved') return { label: `✓ Imeidhinishwa${s.actedAt ? ` · ${formatSwDate(s.actedAt)}` : ''}`, color: '#0B5E40' }
-    if (s.status === 'rejected') return { label: `✗ Imekataliwa${s.actedAt ? ` · ${formatSwDate(s.actedAt)}` : ''}`, color: '#9B1C1C' }
-    if (s.status === 'returned') return { label: `↩ Irudishwa kwa marekebisho${s.actedAt ? ` · ${formatSwDate(s.actedAt)}` : ''}`, color: '#8A5A10' }
+    const st = stepState(s)
+    if (st === 'approved') return { label: `✓ Imeidhinishwa${s.actedAt ? ` · ${formatSwDate(s.actedAt)}` : ''}`, color: '#0B5E40' }
+    if (st === 'rejected') return { label: `✗ Imekataliwa${s.actedAt ? ` · ${formatSwDate(s.actedAt)}` : ''}`, color: '#9B1C1C' }
+    if (st === 'returned') return { label: `↩ Irudishwa kwa marekebisho${s.actedAt ? ` · ${formatSwDate(s.actedAt)}` : ''}`, color: '#8A5A10' }
     return { label: 'Inasubiri — bado haijaidhinishwa', color: '#8A5A10' }
   }
 
