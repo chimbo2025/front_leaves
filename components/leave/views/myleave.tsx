@@ -61,7 +61,7 @@ export function MyLeaveView() {
     <div className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-8 py-6 space-y-6">
       <SectionHeading
         title="My leave plan"
-        subtitle={`${employee.name} — upcoming approved leave, eligibility and history.`}
+        subtitle={`${employee.name} — likizo zijazo zilizoidhinishwa, ustahiki na historia.`}
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -74,7 +74,7 @@ export function MyLeaveView() {
       <Tabs
         tabs={[
           { value: 'upcoming', label: 'Upcoming approved leave', icon: CalendarRange, badge: upcoming.length },
-          { value: 'plan', label: 'Eligibility & balances', icon: Wallet },
+          { value: 'plan', label: 'Ustahiki na salio', icon: Wallet },
           { value: 'history', label: 'Leave history', icon: History, badge: pastLeaves.length },
         ]}
         value={tab}
@@ -166,19 +166,19 @@ export function MyLeaveView() {
       )}
 
       {tab === 'plan' && (
-        <Panel title="Eligibility & balances" subtitle={`${employee.name} — ${employee.title}`} icon={Sparkles}>
+        <Panel title="Ustahiki na salio" subtitle={`${employee.name} — ${employee.title}`} icon={Sparkles}>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
             <div className="rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2">
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Eligible leave types</p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Aina za likizo zinazostahili</p>
               <p className="text-[18px] font-bold text-foreground">{eligibility.filter((e) => e.eligible).length}<span className="text-[12px] font-normal text-muted-foreground"> / {eligibility.length}</span></p>
             </div>
             <div className="rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2">
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Organisation-wide</p>
-              <p className="text-[18px] font-bold text-foreground">{orgEligibility?.total_eligible ?? '—'}<span className="text-[12px] font-normal text-muted-foreground"> / {orgEligibility?.total_employees ?? '—'} employees</span></p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Shirika zima</p>
+              <p className="text-[18px] font-bold text-foreground">{orgEligibility?.total_eligible ?? '—'}<span className="text-[12px] font-normal text-muted-foreground"> / {orgEligibility?.total_employees ?? '—'} watumishi</span></p>
             </div>
             <div className="rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2">
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Your tenure</p>
-              <p className="text-[18px] font-bold text-foreground">{tenureMonths(employee.hireDate)} months</p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Utumishi wako</p>
+              <p className="text-[18px] font-bold text-foreground">{tenureMonths(employee.hireDate)} miezi</p>
             </div>
           </div>
           <ul className="space-y-2">
@@ -191,9 +191,9 @@ export function MyLeaveView() {
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[12px] font-semibold text-foreground flex items-center gap-2">
                       <span className={cn('h-2 w-2 rounded-full', lt.color)} />
-                      {lt.short} {srv && !srv.eligible && <span className="text-[9px] uppercase tracking-wider font-bold text-amber-600 dark:text-amber-400">ineligible</span>}
+                      {lt.short} {srv && !srv.eligible && <span className="text-[9px] uppercase tracking-wider font-bold text-amber-600 dark:text-amber-400">haistahili</span>}
                     </span>
-                    <span className="text-[10px] font-mono text-muted-foreground tabular-nums">{bal.used}/{bal.accrued} used</span>
+                    <span className="text-[10px] font-mono text-muted-foreground tabular-nums">{bal.used}/{bal.accrued} zimetumika</span>
                   </div>
                   <div className="mt-1.5">
                     <div className="h-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
@@ -202,17 +202,17 @@ export function MyLeaveView() {
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-1.5">
                     {srv?.eligible
-                      ? `${bal.remaining} day${bal.remaining === 1 ? '' : 's'} remaining · max ${srv.max_days_per_request}d per request · notice ${srv.min_notice_days}d`
+                      ? `Siku ${bal.remaining} zimebaki · juu ${srv.max_days_per_request}d kwa ombi · taarifa ${srv.min_notice_days}d`
                       : srv?.blockers?.length
                         ? srv.blockers.join('; ')
-                        : `Needs ${pol?.minTenureMonths ?? '—'} months tenure`}
+                        : `Inahitaji utumishi wa miezi ${pol?.minTenureMonths ?? '—'}`}
                   </p>
                 </li>
               )
             })}
           </ul>
           <p className="text-[11px] text-muted-foreground mt-3 flex items-center gap-1.5">
-            <TrendingUp className="w-3.5 h-3.5" /> Balances update automatically as approvals pass. Return dates are set by the approver when leave is granted.
+            <TrendingUp className="w-3.5 h-3.5" /> Salio husasishwa kiotomatiki kadri uidhinishaji unavyopita. Tarehe ya kurudi huwekwa na mwidhinishaji likizo inapoidhinishwa.
           </p>
         </Panel>
       )}

@@ -1465,14 +1465,14 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       if (hire && minMonths > 0) {
         const months = (new Date().getFullYear() - hire.getFullYear()) * 12 + (new Date().getMonth() - hire.getMonth())
         if (months < minMonths) {
-          toast.error('You have not reached the required service tenure for annual leave.')
+          toast.error('Hujafikia kipindi kinachohitajika cha utumishi kwa likizo ya mwaka (You have not reached the required service tenure for annual leave).')
           throw new Error('tenure_not_met')
         }
       }
       const days = input.endDate ? (input.isHalfDay ? 0.5 : dayCount(input.startDate, input.endDate)) : 0
       const policy = policyEffectiveAt(input.leaveTypeId, TODAY, policies)
       if (!policy) {
-        toast.error('No policy is configured for this leave type.')
+        toast.error('Hakuna sera iliyowekwa kwa aina hii ya likizo (No policy is configured for this leave type).')
         throw new Error('missing policy')
       }
       const now = new Date().toISOString()

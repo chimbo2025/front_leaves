@@ -590,22 +590,22 @@ export function RequestsView() {
 
       {tab === 'balances' && (
         <Panel
-          title="Eligibility & balances"
+          title="Ustahiki na salio"
           subtitle={`${employee.name} — ${employee.title}`}
           icon={Sparkles}
         >
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
             <div className="rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2">
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Eligible leave types</p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Aina za likizo zinazostahili</p>
               <p className="text-[18px] font-bold text-foreground">{eligibility.filter((e) => e.eligible).length}<span className="text-[12px] font-normal text-muted-foreground"> / {eligibility.length}</span></p>
             </div>
             <div className="rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2">
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Organisation-wide</p>
-              <p className="text-[18px] font-bold text-foreground">{orgEligibility?.total_eligible ?? '—'}<span className="text-[12px] font-normal text-muted-foreground"> / {orgEligibility?.total_employees ?? '—'} employees</span></p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Shirika zima</p>
+              <p className="text-[18px] font-bold text-foreground">{orgEligibility?.total_eligible ?? '—'}<span className="text-[12px] font-normal text-muted-foreground"> / {orgEligibility?.total_employees ?? '—'} watumishi</span></p>
             </div>
             <div className="rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2">
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Your tenure</p>
-              <p className="text-[18px] font-bold text-foreground">{tenureMonths(employee.hireDate)} months</p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Utumishi wako</p>
+              <p className="text-[18px] font-bold text-foreground">{tenureMonths(employee.hireDate)} miezi</p>
             </div>
           </div>
 
@@ -619,16 +619,16 @@ export function RequestsView() {
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[12px] font-semibold text-foreground flex items-center gap-2">
                       <span className={cn('h-2 w-2 rounded-full', lt.color)} />
-                      {lt.short} {srv && !srv.eligible && <span className="text-[9px] uppercase tracking-wider font-bold text-amber-600 dark:text-amber-400">ineligible</span>}
+                      {lt.short} {srv && !srv.eligible && <span className="text-[9px] uppercase tracking-wider font-bold text-amber-600 dark:text-amber-400">haistahili</span>}
                     </span>
-                    <span className="text-[10px] font-mono text-muted-foreground">{bal.remaining}/{bal.accrued} days</span>
+                    <span className="text-[10px] font-mono text-muted-foreground">{bal.remaining}/{bal.accrued} siku</span>
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-0.5">
                     {srv?.eligible
-                      ? `Eligible · max ${srv.max_days_per_request}d per request · ${srv.min_notice_days}-day notice`
+                      ? `Anastahili · juu ${srv.max_days_per_request}d kwa ombi · taarifa ya siku ${srv.min_notice_days}`
                       : srv?.blockers?.length
                         ? srv.blockers.join('; ')
-                        : `Needs ${pol?.minTenureMonths ?? '?'} months tenure`}
+                        : `Inahitaji utumishi wa miezi ${pol?.minTenureMonths ?? '?'}`}
                   </p>
                 </li>
               )
@@ -1122,7 +1122,7 @@ function policyChecks(
   const out: CheckItem[] = []
 
   if (!policy || !lt) {
-    out.push({ Icon: X, toneCls: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-900', text: 'No policy found for this leave type.' })
+    out.push({ Icon: X, toneCls: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-900', text: 'Hakuna sera iliyopatikana kwa aina hii ya likizo (No policy found for this leave type).' })
     return out
   }
 
@@ -1130,7 +1130,7 @@ function policyChecks(
   // so this can run for a frame before an employee resolves. Bail out with a
   // prompt rather than dereferencing `undefined.hireDate`.
   if (!emp) {
-    out.push({ Icon: X, toneCls: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-900', text: 'Choose an applicant to run the policy checks.' })
+    out.push({ Icon: X, toneCls: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-900', text: 'Chagua mwombaji ili ukaguliwe dhidi ya sera (Choose an applicant to run the policy checks).' })
     return out
   }
 
@@ -1138,30 +1138,30 @@ function policyChecks(
   const tenure = tenureMonths(emp.hireDate)
 
   if (tenure < policy.minTenureMonths) {
-    out.push({ Icon: X, toneCls: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-900', text: `Minimum tenure of ${policy.minTenureMonths} months not met (have ${tenure}).` })
+    out.push({ Icon: X, toneCls: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-900', text: `Kipindi cha chini cha utumishi cha miezi ${policy.minTenureMonths} hakijatimizwa (una miezi ${tenure}) (Minimum tenure not met).` })
   } else {
-    out.push({ Icon: Check, toneCls: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-900', text: 'Tenure requirement satisfied.' })
+    out.push({ Icon: Check, toneCls: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-900', text: 'Sharti la utumishi limetimizwa (Tenure requirement satisfied).' })
   }
 
   if (days > policy.maxDaysPerRequest) {
-    out.push({ Icon: X, toneCls: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-900', text: `${days} days exceeds the ${policy.maxDaysPerRequest}-day per-request maximum.` })
+    out.push({ Icon: X, toneCls: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-900', text: `Siku ${days} zinazidi kiwango cha juu cha siku ${policy.maxDaysPerRequest} kwa ombi moja (Exceeds maximum days per request).` })
   } else if (bal.accrued > 0 && days > bal.remaining) {
-    out.push({ Icon: X, toneCls: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-900', text: `Balance of ${bal.remaining} days is lower than the ${days} days requested.` })
+    out.push({ Icon: X, toneCls: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-900', text: `Salio la siku ${bal.remaining} ni chini ya siku ${days} zilizoombwa (Insufficient leave balance).` })
   } else {
-    out.push({ Icon: Check, toneCls: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-900', text: `Within balance: ${bal.remaining} of ${bal.accrued} days remain.` })
+    out.push({ Icon: Check, toneCls: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-900', text: `Ndani ya salio: zimebaki siku ${bal.remaining} kati ya ${bal.accrued} (Within balance).` })
   }
 
   const notice = Math.max(0, Math.round((new Date(form.startDate).getTime() - new Date(TODAY).getTime()) / 86400000))
   if (notice < policy.minNoticeDays) {
-    out.push({ Icon: AlertTriangle, toneCls: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-900', text: `${lt.name} requires a ${policy.minNoticeDays}-day notice; you are submitting ${notice}.` })
+    out.push({ Icon: AlertTriangle, toneCls: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-900', text: `${lt.name} inahitaji taarifa ya siku ${policy.minNoticeDays}; unawasilisha siku ${notice} (Minimum notice period not met).` })
   } else {
-    out.push({ Icon: Check, toneCls: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-900', text: `Notice period of ${notice} days meets the ${policy.minNoticeDays}-day minimum.` })
+    out.push({ Icon: Check, toneCls: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-900', text: `Taarifa ya siku ${notice} inakidhi kiwango cha chini cha siku ${policy.minNoticeDays} (Notice period satisfied).` })
   }
 
   if (policy.requiresDocuments) {
-    out.push({ Icon: Paperclip, toneCls: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-900', text: `Required documents: ${policy.requiredDocs.join(', ')}.` })
+    out.push({ Icon: Paperclip, toneCls: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-900', text: `Nyaraka zinazohitajika: ${policy.requiredDocs.join(', ')}.` })
   } else {
-    out.push({ Icon: Check, toneCls: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-900', text: 'No documents required for this leave type.' })
+    out.push({ Icon: Check, toneCls: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-900', text: 'Hakuna nyaraka zinazohitajika kwa aina hii ya likizo (No documents required).' })
   }
 
   const overlap = form.endDate
@@ -1179,9 +1179,9 @@ function policyChecks(
           r.endDate >= form.startDate,
       )
   if (overlap) {
-    out.push({ Icon: X, toneCls: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-900', text: `Dates overlap an existing ${leaveTypes.find((t) => t.id === overlap.leaveTypeId)?.short ?? overlap.leaveTypeId} request (${fmtShort(overlap.startDate)} → ${fmtShort(overlap.endDate)}).` })
+    out.push({ Icon: X, toneCls: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-900', text: `Tarehe zinagongana na ombi la ${leaveTypes.find((t) => t.id === overlap.leaveTypeId)?.short ?? overlap.leaveTypeId} (${fmtShort(overlap.startDate)} → ${fmtShort(overlap.endDate)}) (Overlapping leave exists).` })
   } else {
-    out.push({ Icon: Check, toneCls: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-900', text: 'No overlap with approved or in-review requests.' })
+    out.push({ Icon: Check, toneCls: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-900', text: 'Hakuna mgongano na maombi yaliyoidhinishwa au yanayokaguliwa (No overlap).' })
   }
 
   out.push({ Icon: Info, toneCls: 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950 dark:text-sky-300 dark:border-sky-900', text: policy.notes })
@@ -1191,8 +1191,8 @@ function policyChecks(
       Icon: Siren,
       toneCls: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-900',
       text: form.emergencyReason?.trim()
-        ? `Emergency exception: approval will send a privacy-safe SMS. Reason recorded: ${form.emergencyReason.trim()}.`
-        : 'Emergency exception: an approver must record the emergency reason before submission.',
+        ? `Ubaguzi wa dharura: uidhinishaji utatuma SMS isiyo na taarifa nyeti. Sababu imerekodiwa: ${form.emergencyReason.trim()}.`
+        : 'Ubaguzi wa dharura: mwidhinishaji lazima arekodi sababu ya dharura kabla ya kuwasilisha (An approver must record the emergency reason).',
     })
   }
 
