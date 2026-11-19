@@ -1510,8 +1510,9 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         if (input.documentFile) {
           try {
             await leaveApi.requests.attachDocument(created.data.id, input.documentFile, 'supporting')
-          } catch {
-            toast.warning(`${created.data.ref ?? 'Request'} saved but document upload failed.`)
+          } catch (err) {
+            const detail = err instanceof Error && err.message ? ` (${err.message})` : ''
+            toast.warning(`${created.data.ref ?? 'Request'} saved but document upload failed${detail}.`)
           }
         }
         const submitted = await safe(leaveApi.requests.submit(created.data.id))

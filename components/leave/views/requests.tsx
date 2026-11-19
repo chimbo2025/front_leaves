@@ -181,17 +181,38 @@ export function RequestsView() {
   const [forceDeleteReason, setForceDeleteReason] = useState('')
   const [approveTarget, setApproveTarget] = useState<{ request: LeaveRequest; stepOrder: number; isFinalStep: boolean } | null>(null)
   const [approveReturnDate, setApproveReturnDate] = useState(TODAY)
+  const [approveIsPaid, setApproveIsPaid] = useState(true)
   // Same signature ceremony as the Approvals queue: the API refuses
   // signature-less approvals, so every Grant path must collect one first.
-  const [signatureStep, setSignatureStep] = useState<'pending' | 'completed'>('pending')
-  const [signatureData, setSignatureData] = useState<{ path: string | null; hash: string | null }>({ path: null, hash: null })
+  // The dialog opens only when the approver presses Grant, after they have
+  // read the file and written any comment.
+  const [signatureOpen, setSignatureOpen] = useState(false)
+  const [decisionTarget, setDecisionTarget] = useState<{ request: LeaveRequest; decision: 'returned' | 'rejected' } | null>(null)
+  const [decisionReason, setDecisionReason] = useState('')
   const [approvalInsight, setApprovalInsight] = useState<ApprovalInsight | null>(null)
   const [approvalInsightLoading, setApprovalInsightLoading] = useState(false)
   const [approveComment, setApproveComment] = useState('')
   const resetSignature = () => {
-    setSignatureStep('pending')
-    setSignatureData({ path: null, hash: null })
+    setSignatureOpen(false)
     setApproveComment('')
+    setApproveIsPaid(true)
+  }
+
+  const requestDecision = (r: LeaveRequest, decision: 'returned' | 'rejected') => {
+    if (!nextPending(r)) return
+    setDecisionReason('')
+    setDecisionTarget({ request: r, decision })
+  }
+
+  const submitDecision = () => {
+    if (!decisionTarget) return
+    const step = nextPending(decisionTarget.request)
+    if (!step) return
+    const reason = decisionReason.trim()
+    if (reason.length < 3) return
+    decide(decisionTarget.request.id, step.order, decisionTarget.decision, reason)
+    setDecisionTarget(null)
+    setDecisionReason('')
   }
 
   useEffect(() => {
@@ -385,8 +406,8 @@ export function RequestsView() {
     const step = nextPending(r)
     if (canAct(r) && step) {
       items.push({ icon: Check, label: 'Approve', onClick: () => { setApproveTarget({ request: r, stepOrder: step.order, isFinalStep: r.steps.filter((s) => s.status === 'pending').length === 1 }); setApproveReturnDate(r.startDate >= TODAY ? r.startDate : TODAY); resetSignature() } })
-      items.push({ icon: RotateCcw, label: 'Return to applicant', onClick: () => decide(r.id, step.order, 'returned', '(from list)') })
-      items.push({ icon: X, label: 'Reject', tone: 'danger', onClick: () => decide(r.id, step.order, 'rejected', '(from list)') })
+      items.push({ icon: RotateCcw, label: 'Return to applicant', onClick: () => requestDecision(r, 'returned') })
+      items.push({ icon: X, label: 'Reject', tone: 'danger', onClick: () => requestDecision(r, 'rejected') })
     }
     if (r.status === 'draft') {
       // Drafts: the applicant alone may retry-submit or truly delete
@@ -751,6 +772,7 @@ export function RequestsView() {
               <Paperclip className="w-4 h-4 text-muted-foreground" />
               <input
                 type="file"
+                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp"
                 onChange={(e) => setForm({ ...form, documentFile: e.target.files?.[0] ?? null })}
                 className="flex-1 bg-transparent text-sm text-foreground file:mr-2 file:rounded file:border-0 file:bg-teal-50 file:px-2 file:py-1 file:text-[12px] file:font-semibold file:text-teal-700"
               />
@@ -829,13 +851,13 @@ export function RequestsView() {
         footer={
           detail && canAct(detail) && nextPending(detail) ? (
             <div className="flex flex-wrap items-center gap-2">
-              <Btn variant="emerald" onClick={() => { const s = nextPending(detail)!; setApproveTarget({ request: detail, stepOrder: s.order, isFinalStep: detail.steps.filter((step) => step.status === 'pending').length === 1 }); setApproveReturnDate(detail.startDate >= TODAY ? detail.startDate : TODAY); setDetail(null) }}>
+              <Btn variant="emerald" onClick={() => { const s = nextPending(detail)!; setApproveTarget({ request: detail, stepOrder: s.order, isFinalStep: detail.steps.filter((step) => step.status === 'pending').length === 1 }); setApproveReturnDate(detail.startDate >= TODAY ? detail.startDate : TODAY); resetSignature(); setDetail(null) }}>
                 <Check className="w-3.5 h-3.5" /> Approve
               </Btn>
-              <Btn variant="outline" className="border-orange-300 text-orange-700 hover:bg-orange-50 dark:text-orange-300 dark:hover:bg-orange-950" onClick={() => { const s = nextPending(detail)!; decide(detail.id, s.order, 'returned', '(from detail)'); setDetail(null) }}>
+              <Btn variant="outline" className="border-orange-300 text-orange-700 hover:bg-orange-50 dark:text-orange-300 dark:hover:bg-orange-950" onClick={() => { const d = detail; setDetail(null); requestDecision(d, 'returned') }}>
                 <RotateCcw className="w-3.5 h-3.5" /> Return
               </Btn>
-              <Btn variant="danger" onClick={() => { const s = nextPending(detail)!; decide(detail.id, s.order, 'rejected', '(from detail)'); setDetail(null) }}>
+              <Btn variant="danger" onClick={() => { const d = detail; setDetail(null); requestDecision(d, 'rejected') }}>
                 <X className="w-3.5 h-3.5" /> Reject
               </Btn>
             </div>
@@ -944,89 +966,120 @@ export function RequestsView() {
         title={approveTarget ? `Idhinisha / Approve ${approveTarget.request.ref}` : 'Approve request'}
         subtitle={approveTarget?.isFinalStep ? 'Mwidhinishaji wa mwisho huweka tarehe ya kurudi kazini na muda wa likizo. / The final approver sets the return date and granted duration.' : 'Rekodi uamuzi wako — tarehe ya kurudi na muda zinahifadhiwa kwa mwidhinishaji wa mwisho. / Record your decision.'}
         size="md"
-        footer={
-          signatureStep === 'completed' ? (
-          <div className="flex items-center gap-2">
-            <Btn
-              variant="emerald"
-              disabled={approveTarget?.isFinalStep === true && !approveReturnDate}
-              onClick={() => {
-                if (!approveTarget) return
-                decide(approveTarget.request.id, approveTarget.stepOrder, 'approved', approveComment.trim() || undefined, approveTarget.isFinalStep ? approveReturnDate : undefined, signatureData.path ?? undefined, signatureData.hash ?? undefined)
-                resetSignature()
-                setApproveTarget(null)
-              }}
-            >
-              <Check className="w-3.5 h-3.5" /> Grant leave
-            </Btn>
-            <Btn variant="outline" onClick={() => { setApproveTarget(null); resetSignature() }}>Cancel</Btn>
-          </div>
-          ) : undefined
-        }
       >
         {approveTarget && (
           <>
+            <div className="space-y-4">
+              <PreviousDecisions steps={approveTarget.request.steps} />
+              <div className="rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2.5">
+                <p className="text-[12px] font-semibold text-foreground">
+                  {typeOf(approveTarget.request.leaveTypeId)?.name} — imependekezwa kuanzia {fmtShort(approveTarget.request.startDate)}
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {approveTarget.request.reason || 'Hakuna sababu iliyotolewa. / No reason given.'}
+                </p>
+              </div>
+              {approveTarget.isFinalStep ? (
+                <>
+                  <TextInput
+                    type="date"
+                    label="Tarehe ya kurudi kazini"
+                    hint="Siku ambayo mfanyakazi anarudi kazini — siku za likizo huhesabiwa hadi siku inayotangulia."
+                    value={approveReturnDate}
+                    onChange={(e) => setApproveReturnDate(e.target.value)}
+                  />
+                  <p className="text-[12px] font-mono text-foreground">
+                    {approveReturnDate ? `≈ ${fmtShort(approveTarget.request.startDate)} → ${fmtShort(approveReturnDate)} · siku ${approvalProposedDays}` : 'Weka tarehe ya kurudi ili kutoa likizo.'}
+                  </p>
+                  <label className="flex items-center gap-2 text-[12px] font-semibold text-foreground">
+                    <input type="checkbox" checked={approveIsPaid} onChange={(e) => setApproveIsPaid(e.target.checked)} className="h-4 w-4 rounded border-border" />
+                    Likizo hii italipwa / This leave is paid
+                  </label>
+                </>
+              ) : (
+                <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12px] text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200">
+                  Hatua ya kati ya kuidhinisha. Tarehe ya kurudi na siku zilizopewa zinahifadhiwa kwa mwidhinishaji wa mwisho.
+                </p>
+              )}
+              <ApprovalInsightBoxes
+                insight={approvalInsight}
+                loading={approvalInsightLoading}
+                isFinalStep={approveTarget.isFinalStep}
+                isAnnual={approveTarget.request.leaveTypeId === annualTypeId}
+                proposedDays={approvalProposedDays}
+                fallbackBalance={approvalAnnualBalance}
+              />
+              <TextArea
+                label="Maoni ya uamuzi (yanahifadhiwa)"
+                value={approveComment}
+                onChange={(e) => setApproveComment(e.target.value)}
+                rows={2}
+                placeholder="Maoni ya hiari kwa mwombaji…"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Btn
+                variant="emerald"
+                disabled={approveTarget?.isFinalStep === true && !approveReturnDate}
+                onClick={() => setSignatureOpen(true)}
+              >
+                <Check className="w-3.5 h-3.5" /> Grant leave
+              </Btn>
+              <Btn variant="outline" onClick={() => { setApproveTarget(null); resetSignature() }}>Cancel</Btn>
+            </div>
+
+            {/* Last step: sign, then the decision is recorded. Closing this
+                dialog returns to the form rather than cancelling the approval. */}
             <ApprovalModal
-              open={signatureStep === 'pending'}
-              onClose={() => {
-                // Cancel/X on the signature dialog cancels the whole approval;
-                // setting the step back to "pending" would only reopen it.
-                setApproveTarget(null)
-                resetSignature()
-              }}
+              open={signatureOpen}
+              onClose={() => setSignatureOpen(false)}
               allowOverwrite={true}
               onSignatureComplete={async (path: string, hash: string) => {
-                setSignatureData({ path, hash })
-                setSignatureStep('completed')
+                const target = approveTarget
+                setSignatureOpen(false)
+                if (!target) return
+                decide(target.request.id, target.stepOrder, 'approved', approveComment.trim() || undefined, target.isFinalStep ? approveReturnDate : undefined, path, hash, approveIsPaid)
+                resetSignature()
+                setApproveTarget(null)
               }}
             />
-            {signatureStep === 'completed' && (
-          <div className="space-y-4">
-            <PreviousDecisions steps={approveTarget.request.steps} />
-            <div className="rounded-xl border border-border bg-warm dark:bg-muted/30 px-3 py-2.5">
-              <p className="text-[12px] font-semibold text-foreground">
-                {typeOf(approveTarget.request.leaveTypeId)?.name} — imependekezwa kuanzia {fmtShort(approveTarget.request.startDate)}
-              </p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                {approveTarget.request.reason || 'Hakuna sababu iliyotolewa. / No reason given.'}
-              </p>
-            </div>
-            {approveTarget.isFinalStep ? (
-              <>
-                <TextInput
-                  type="date"
-                  label="Tarehe ya kurudi kazini"
-                  hint="Siku ambayo mfanyakazi anarudi kazini — siku za likizo huhesabiwa hadi siku inayotangulia."
-                  value={approveReturnDate}
-                  onChange={(e) => setApproveReturnDate(e.target.value)}
-                />
-                <p className="text-[12px] font-mono text-foreground">
-                  {approveReturnDate ? `≈ ${fmtShort(approveTarget.request.startDate)} → ${fmtShort(approveReturnDate)} · siku ${approvalProposedDays}` : 'Weka tarehe ya kurudi ili kutoa likizo.'}
-                </p>
-              </>
-            ) : (
-              <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12px] text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200">
-                Hatua ya kati ya kuidhinisha. Tarehe ya kurudi na siku zilizopewa zinahifadhiwa kwa mwidhinishaji wa mwisho.
-              </p>
-            )}
-            <ApprovalInsightBoxes
-              insight={approvalInsight}
-              loading={approvalInsightLoading}
-              isFinalStep={approveTarget.isFinalStep}
-              isAnnual={approveTarget.request.leaveTypeId === annualTypeId}
-              proposedDays={approvalProposedDays}
-              fallbackBalance={approvalAnnualBalance}
-            />
-            <TextArea
-              label="Maoni ya uamuzi (yanahifadhiwa)"
-              value={approveComment}
-              onChange={(e) => setApproveComment(e.target.value)}
-              rows={2}
-              placeholder="Maoni ya hiari kwa mwombaji…"
-            />
-          </div>
-            )}
           </>
+        )}
+      </Modal>
+
+      {/* Return/Reject require a written reason; the requester sees it. */}
+      <Modal
+        open={decisionTarget !== null}
+        onClose={() => { setDecisionTarget(null); setDecisionReason('') }}
+        title={decisionTarget?.decision === 'rejected' ? 'Kataa ombi / Reject request' : 'Rudisha ombi / Return for correction'}
+        subtitle={decisionTarget ? `${decisionTarget.request.ref} · ${employees.find((e) => e.id === decisionTarget.request.employeeId)?.name ?? decisionTarget.request.employeeId}` : undefined}
+        size="md"
+      >
+        {decisionTarget && (
+          <div className="space-y-4">
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+              Sababu hii itaonekana kwa mwombaji. / This reason is shown to the requester.
+            </p>
+            <TextArea
+              label="Sababu / Reason (required)"
+              value={decisionReason}
+              onChange={(e) => setDecisionReason(e.target.value)}
+              rows={4}
+              placeholder={decisionTarget.decision === 'rejected' ? 'Eleza kwa nini ombi linakataliwa…' : 'Eleza kinachopaswa kurekebishwa…'}
+            />
+            <div className="flex items-center gap-2">
+              <Btn
+                variant={decisionTarget.decision === 'rejected' ? 'danger' : 'outline'}
+                disabled={decisionReason.trim().length < 3}
+                onClick={submitDecision}
+              >
+                {decisionTarget.decision === 'rejected' ? <X className="w-3.5 h-3.5" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                {decisionTarget.decision === 'rejected' ? 'Kataa / Reject' : 'Rudisha / Return'}
+              </Btn>
+              <Btn variant="outline" onClick={() => { setDecisionTarget(null); setDecisionReason('') }}>Cancel</Btn>
+            </div>
+          </div>
         )}
       </Modal>
     </div>

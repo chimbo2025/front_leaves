@@ -1139,11 +1139,20 @@ export const leaveApi = {
       const fd = new FormData()
       fd.append('file', file)
       if (kind) fd.append('kind', kind)
-      const headers: Record<string, string> = {}
+      const headers: Record<string, string> = { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
       if (bearerToken) headers.Authorization = `Bearer ${bearerToken}`
       return fetch(`/api/requests/${id}/documents`, { method: 'POST', body: fd, headers }).then(async (res) => {
         const data = await res.json().catch(() => null)
-        if (!res.ok) throw new ApiError(res.status, data?.message ?? 'Upload failed', data?.errors)
+        if (!res.ok) {
+          // Surface the field-level validation message ("the file must be a
+          // file of type: pdf, doc, docx...") instead of a generic failure so
+          // the uploader knows whether it was the type or the size.
+          const first = data?.errors && typeof data.errors === 'object'
+            ? (Object.values(data.errors as Record<string, unknown>)[0] as unknown)
+            : null
+          const fieldMessage = Array.isArray(first) ? String(first[0]) : null
+          throw new ApiError(res.status, fieldMessage ?? data?.message ?? 'Upload failed', data?.errors)
+        }
         return data as { data: DocumentDto }
       })
     },

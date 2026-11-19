@@ -194,9 +194,15 @@ export function RequestDetail({ request, isHr = false, actions }: { request: Lea
                     {s.assigneeName} {s.via === 'delegation' && <span className="text-amber-600 dark:text-amber-400">(via delegation)</span>}
                     {' · '}Due {fmtShort(s.dueAt)}
                   </p>
-                  {s.comments && employeeId !== request.employeeId && (
+                  {s.comments && (employeeId !== request.employeeId || s.status === 'returned' || s.status === 'rejected') && (
                     <p className="text-[12px] text-foreground mt-1.5 border-t border-border/60 pt-1.5 whitespace-pre-wrap">
-                      <span className="text-muted-foreground">Maoni ya mwidhinishaji / Decision comment: </span>{s.comments}
+                      <span className="text-muted-foreground">
+                        {s.status === 'rejected'
+                          ? 'Sababu ya kukataa / Reason for rejection: '
+                          : s.status === 'returned'
+                            ? 'Sababu ya kurudisha / Reason for return: '
+                            : 'Maoni ya mwidhinishaji / Decision comment: '}
+                      </span>{s.comments}
                     </p>
                   )}
                   {s.actedAt && <p className="text-[11px] text-muted-foreground mt-1">Acted {fmtShort(s.actedAt)}</p>}
