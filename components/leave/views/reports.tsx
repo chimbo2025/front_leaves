@@ -473,9 +473,9 @@ export function ReportsView() {
       link.click()
       link.remove()
       window.setTimeout(() => URL.revokeObjectURL(objectUrl), 2000)
-      toast.success(`Export ready · ${created.data.row_count ?? 0} rows`)
+      toast.success(`Uhamishaji tayari · mistari ${created.data.row_count ?? 0}`)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Could not export this report.')
+      toast.error(error instanceof Error ? error.message : 'Imeshindikana kuhamisha ripoti hii.')
     } finally {
       setExportBusy(false)
     }
@@ -997,7 +997,7 @@ function PaymentOperationsPanel() {
       const response = await leaveApi.leavePayments.list()
       setCases(response.data)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Payment cases could not be loaded.')
+      toast.error(error instanceof Error ? error.message : 'Kesi za malipo hazikuweza kupakiwa.')
     } finally {
       setLoading(false)
     }
@@ -1016,22 +1016,22 @@ function PaymentOperationsPanel() {
 
   const prepareCase = async (request: LeaveRequest) => {
     if (existingRequestIds.has(Number(request.id))) {
-      toast.info('A payment case already exists for this leave request.')
+      toast.info('Kesi ya malipo tayari ipo kwa ombi hili la likizo.')
       return
     }
     try {
       const { data } = await leaveApi.requests.approvalInsight(request.id)
       if (!data.payment_eligible) {
         toast.info(data.annual_request_number
-          ? `Annual request #${data.annual_request_number} is not payable under the every-second-request rule.`
-          : 'Payment eligibility could not be determined.')
+          ? `Ombi la mwaka #${data.annual_request_number} halilipwi chini ya kanuni ya kila ombi la pili.`
+          : 'Ustahiki wa malipo haukuweza kubainishwa.')
         return
       }
       setCreateTarget(request)
       setSalaryAmount('')
       setSalaryBasis('monthly_salary')
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Payment eligibility could not be checked.')
+      toast.error(error instanceof Error ? error.message : 'Ustahiki wa malipo haukuweza kukaguliwa.')
     }
   }
 
@@ -1051,11 +1051,11 @@ function PaymentOperationsPanel() {
         currency: 'TZS',
         idempotency_key: `annual-encashment:${createTarget.id}`,
       })
-      toast.success('Payment case created. Submit it for HR review when ready.')
+      toast.success('Kesi ya malipo imeundwa. Iwasilishe kwa ukaguzi wa HR ukiwa tayari.')
       setCreateTarget(null)
       await loadCases()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Payment case could not be created.')
+      toast.error(error instanceof Error ? error.message : 'Kesi ya malipo haikuweza kuundwa.')
     } finally {
       setCreateBusy(false)
     }
@@ -1069,7 +1069,7 @@ function PaymentOperationsPanel() {
       setManageTarget(null)
       await loadCases()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Payment case could not be updated.')
+      toast.error(error instanceof Error ? error.message : 'Kesi ya malipo haikuweza kusasishwa.')
     } finally {
       setBusyId(null)
     }

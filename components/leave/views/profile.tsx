@@ -42,27 +42,27 @@ export function ProfileView() {
     setBusy(true)
     try {
       await updateProfile({ email: emailDraft.trim(), payrollNo: payrollDraft.trim() })
-      toast.success('Profile details updated.')
+      toast.success('Taarifa za wasifu zimesasishwa.')
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Could not save details.')
+      toast.error(err instanceof ApiError ? err.message : 'Imeshindikana kuhifadhi taarifa.')
     } finally {
       setBusy(false)
     }
   }
 
   const savePassword = async () => {
-    if (!curPw) return toast.error('Enter your current password.')
-    if (newPw.length < 8) return toast.error('New password must be at least 8 characters.')
-    if (newPw !== confirmPw) return toast.error('New password confirmation does not match.')
+    if (!curPw) return toast.error('Weka nenosiri lako la sasa.')
+    if (newPw.length < 8) return toast.error('Nenosiri jipya lazima liwe na angalau herufi 8.')
+    if (newPw !== confirmPw) return toast.error('Uthibitisho wa nenosiri jipya haufanani.')
     setBusy(true)
     try {
       await updateProfile({ currentPassword: curPw, newPassword: newPw })
-      toast.success('Password changed.')
+      toast.success('Nenosiri limebadilishwa.')
       setCurPw('')
       setNewPw('')
       setConfirmPw('')
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Could not change password.')
+      toast.error(err instanceof ApiError ? err.message : 'Imeshindikana kubadilisha nenosiri.')
     } finally {
       setBusy(false)
     }

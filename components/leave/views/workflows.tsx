@@ -704,10 +704,10 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
     try {
       if (builder.mode === 'edit' && builder.defId) {
         await leaveApi.workflows.update(builder.defId, payload)
-        toast.success('Workflow updated. New submissions use the revised chain.')
+        toast.success('Mchakato umesasishwa. Maombi mapya yatatumia mnyororo uliorekebishwa.')
       } else {
         await leaveApi.workflows.store(payload)
-        toast.success('Workflow created. New submissions use this chain.')
+        toast.success('Mchakato umeundwa. Maombi mapya yatatumia mnyororo huu.')
       }
       await afterWrite()
       closeBuilder()
@@ -733,8 +733,8 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
       await leaveApi.workflows.update(def.id, { is_active: !def.is_active })
       toast.info(
         def.is_active
-          ? 'Workflow deactivated. It no longer routes new submissions.'
-          : 'Workflow activated. New submissions will use it.',
+          ? 'Mchakato umezimwa. Hautapitisha maombi mapya.'
+          : 'Mchakato umewashwa. Maombi mapya yatautumia.',
       )
       await afterWrite()
     } catch (error) {
@@ -747,7 +747,7 @@ export function WorkflowsView({ onNavigate }: { onNavigate?: (v: string) => void
     setDeleting(true)
     try {
       await leaveApi.workflows.destroy(deleteDef.id)
-      toast.success('Workflow deleted.')
+      toast.success('Mchakato umefutwa.')
       await afterWrite()
     } catch (error) {
       toast.error(errorText(error))

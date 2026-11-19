@@ -349,7 +349,7 @@ async function safe<T>(p: Promise<T>): Promise<T | undefined> {
   try {
     return await p
   } catch (err) {
-    let message = err instanceof ApiError ? err.message : 'Unexpected error — is the backend running?'
+    let message = err instanceof ApiError ? err.message : 'Hitilafu isiyotarajiwa — je, seva inaendesha?'
     if (err instanceof ApiError && err.fieldErrors) {
       const details = Object.values(err.fieldErrors)
         .flat()
@@ -1527,7 +1527,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
             await leaveApi.requests.attachDocument(created.data.id, input.documentFile, 'supporting')
           } catch (err) {
             const detail = err instanceof Error && err.message ? ` (${err.message})` : ''
-            toast.warning(`${created.data.ref ?? 'Request'} saved but document upload failed${detail}.`)
+            toast.warning(`${created.data.ref ?? 'Ombi'} limehifadhiwa lakini upakiaji wa nyaraka umeshindikana${detail}.`)
           }
         }
         const submitted = await safe(leaveApi.requests.submit(created.data.id))
@@ -1537,11 +1537,11 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
           // row now exists as a draft. Say where it went — without this the
           // failure used to look like a success while an invisible draft
           // piled up in the list with no way to submit it again.
-          toast.warning(`${created.data.ref ?? 'Request'} saved as a draft — open it in the list and choose “Submit for approval”.`)
+          toast.warning(`${created.data.ref ?? 'Ombi'} limehifadhiwa kama rasimu — lifungue kwenye orodha na uchague “Wasilisha kwa uidhinishaji”.`)
           return
         }
         const typeName = typeOf(input.leaveTypeId)?.name ?? input.leaveTypeId
-        toast.success(`${submitted.data.ref} submitted. Return date will be set at approval.`)
+        toast.success(`${submitted.data.ref} imewasilishwa. Tarehe ya kurudi itawekwa wakati wa uidhinishaji.`)
       })()
 
       return optimistic
@@ -1554,7 +1554,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       const req = requests.find((r) => r.id === requestId)
       if (!req) return
       if (!EDITABLE_STATUSES.includes(req.status)) {
-        toast.error('Completed requests are locked in the audit trail.')
+        toast.error('Maombi yaliyokamilika yamefungwa katika kumbukumbu za ukaguzi.')
         return
       }
       void safe(
@@ -1569,7 +1569,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
           .then((res) => {
             const merged = requestFromResource(req, res.data)
             setRequests((prev) => prev.map((r) => (r.id === String(res.data.id) ? merged : r)))
-            toast.success(`${merged.ref} updated.`)
+            toast.success(`${merged.ref} imesasishwa.`)
           }),
       )
     },
@@ -1615,7 +1615,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         const merged = requestFromResource(req, res.data, res.workflow, slaMap(wfRef.current))
         setRequests((prev) => prev.map((r) => (r.id === String(res.data.id) ? merged : r)))
         refreshWithHandovers()
-        toast.success(`${merged.ref} resubmitted for continued approval.`)
+        toast.success(`${merged.ref} imewasilishwa tena ili uidhinishaji uendelee.`)
       })()
     },
     [requests, refreshAfterWrite, refreshWithHandovers],
@@ -1629,7 +1629,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       void (async () => {
         const res = await safe(leaveApi.requests.withdraw(requestId, { reason: reason ?? undefined }))
         refreshWithHandovers()
-        if (res) toast.success(`${res.data.ref} withdrawn. Approval chain closed.`)
+        if (res) toast.success(`${res.data.ref} imeondolewa. Mnyororo wa uidhinishaji umefungwa.`)
       })()
     },
     [requests, refreshWithHandovers],
@@ -1648,7 +1648,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         const merged = requestFromResource(req, res.data, res.workflow, slaMap(wfRef.current))
         setRequests((prev) => prev.map((r) => (r.id === String(res.data.id) ? merged : r)))
         refreshWithHandovers()
-        toast.success(`${merged.ref} submitted for approval.`)
+        toast.success(`${merged.ref} imewasilishwa kwa uidhinishaji.`)
       })()
     },
     [requests, refreshAfterWrite, refreshWithHandovers],
@@ -1659,14 +1659,14 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       const req = requests.find((r) => r.id === requestId)
       if (!req) return
       if (req.status !== 'draft') {
-        toast.error('Only draft requests can be deleted — submitted requests stay in the audit trail.')
+        toast.error('Ni maombi ya rasimu pekee yanayoweza kufutwa — maombi yaliyowasilishwa yanabaki kwenye kumbukumbu za ukaguzi.')
         return
       }
       void (async () => {
         const res = await safe(leaveApi.requests.destroy(requestId))
         if (!res) return
         setRequests((prev) => prev.filter((r) => r.id !== requestId))
-        toast.success(`${req.ref} deleted — it was never submitted.`)
+        toast.success(`${req.ref} imefutwa — haikuwahi kuwasilishwa.`)
       })()
     },
     [requests],
@@ -1686,7 +1686,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         refreshAfterWrite()
         if (res) {
           const name = getEmployee(input.delegateId)?.name ?? input.delegateId
-          toast.success(`Delegation created for ${name}. Original authority preserved in audit history.`)
+          toast.success(`Uwakilishi umeundwa kwa ${name}. Mamlaka ya awali imehifadhiwa kwenye historia ya ukaguzi.`)
         }
       })()
     },
@@ -1711,7 +1711,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
           await safe(leaveApi.delegations.revoke(id))
         }
         refreshAfterWrite()
-        toast.info(active ? 'Delegation re-activated.' : 'Delegation revoked.')
+        toast.info(active ? 'Uwakilishi umewashwa tena.' : 'Uwakilishi umeondolewa.')
       })()
     },
     [delegations, refreshAfterWrite],
@@ -1723,15 +1723,15 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
     (caseId: string, input: { fromOwnerId?: string; toOwnerId: string; reason: string }) => {
       const c = cases.find((x) => x.id === caseId)
       if (!c) {
-        toast.error('Case not found.')
+        toast.error('Kesi haipatikani.')
         return
       }
       if (c.status === 'closed') {
-        toast.error('Closed cases cannot be handed over.')
+        toast.error('Kesi zilizofungwa haziwezi kukabidhiwa.')
         return
       }
       if (!c.requestId) {
-        toast.error('Only dockets attached to a leave request can be handed over.')
+        toast.error('Ni docket zilizoambatishwa na ombi la likizo pekee zinazoweza kukabidhiwa.')
         return
       }
       void (async () => {
@@ -1744,7 +1744,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         refreshWithHandovers()
         if (res) {
           const to = getEmployee(input.toOwnerId)
-          toast.success(`Handover recorded. ${to?.name.split(' ')[0] ?? 'The delegate'} must accept before deciding.`)
+          toast.success(`Makabidhiano yamerekodiwa. ${to?.name.split(' ')[0] ?? 'Mwakilishi'} lazima akubali kabla ya kuamua.`)
         }
       })()
     },
@@ -1758,7 +1758,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         refreshWithHandovers()
         if (res) {
           const to = getEmployee(res.data.to_employee_id)
-          toast.success(`Docket accepted. ${to?.name.split(' ')[0] ?? 'The approver'} can now decide.`)
+          toast.success(`Docket imekubaliwa. ${to?.name.split(' ')[0] ?? 'Mwidhinishaji'} anaweza sasa kuamua.`)
         }
       })()
     },
@@ -1770,7 +1770,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       void (async () => {
         const res = await safe(leaveApi.handovers.reject(Number(handoverId), reason ?? undefined))
         refreshWithHandovers()
-        if (res) toast.info(res.data.status === 'rejected' ? 'Handover declined. The request is paused until a new owner accepts.' : 'Handover updated.')
+        if (res) toast.info(res.data.status === 'rejected' ? 'Makabidhiano yamekataliwa. Ombi limesimamishwa hadi mmiliki mpya akubali.' : 'Makabidhiano yamesasishwa.')
       })()
     },
     [refreshWithHandovers],
@@ -1783,7 +1783,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       setCases((prev) =>
         prev.map((x) => (x.id === caseId ? { ...x, status: 'closed' as const, note: reason || x.note } : x)),
       )
-      toast.info(`${c.ref} case closed.`)
+      toast.info(`${c.ref} kesi imefungwa.`)
     },
     [cases],
   )
@@ -1824,7 +1824,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         )
         await safe(loadPolicies())
         const typeName = typeOf(existing.leaveTypeId)?.name ?? existing.leaveTypeId
-        if (res) toast.success(`${typeName} policy updated to v${res.data.version}. Previous version preserved.`)
+        if (res) toast.success(`Sera ya ${typeName} imesasishwa hadi toleo la v${res.data.version}. Toleo la awali limehifadhiwa.`)
       })()
     },
     [policies, typeOf, loadPolicies],
@@ -1843,7 +1843,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         uploadedAt: TODAY,
       }
       setRequests((prev) => prev.map((r) => (r.id === requestId ? { ...r, documents: [...r.documents, doc] } : r)))
-      toast.success('Document secured and recorded.')
+      toast.success('Nyaraka imehifadhiwa na kurekodiwa.')
     },
     [employeeId, employee.name],
   )
@@ -1852,7 +1852,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
     setRequests((prev) =>
       prev.map((r) => (r.id === requestId ? { ...r, documents: r.documents.filter((d) => d.id !== docId) } : r)),
     )
-    toast.info('Document removed. Action recorded in audit.')
+    toast.info('Nyaraka imeondolewa. Hatua imerekodiwa kwenye ukaguzi.')
   }, [])
 
   const updateEmployee = React.useCallback(
@@ -1879,8 +1879,8 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         }
         await safe(loadEmployees())
         const name = target.name
-        if (patch.title) toast.info(`${name} title cannot be edited via the API — update the position instead.`)
-        else toast.success('Staff profile updated.')
+        if (patch.title) toast.info(`Cheo cha ${name} hakiwezi kuhaririwa kupitia API — sasisha nafasi badala yake.`)
+        else toast.success('Wasifu wa mtumishi umesasishwa.')
         return true
       })()
     },
@@ -1895,7 +1895,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       void (async () => {
         const res = await safe(leaveApi.org.updateEmployee(id, { is_active: nextActive }))
         await safe(loadEmployees())
-        toast.info(`${target.name} ${res ? 'activated' : 'update failed'}.`)
+        toast.info(`${target.name} ${res ? 'amewashwa' : 'imeshindikana kusasisha'}.`)
       })()
     },
     [employees, loadEmployees],
@@ -1910,7 +1910,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       setEmployees((prev) => prev.filter((e) => e.id !== id))
       setRequests((prev) => prev.filter((r) => r.employeeId !== id))
       refreshAfterWrite()
-      toast.success(`${target?.name ?? 'Staff member'} permanently deleted. Evidence and payment records were preserved.`)
+      toast.success(`${target?.name ?? 'Mtumishi'} amefutwa kabisa. Kumbukumbu za ushahidi na malipo zimehifadhiwa.`)
       return true
     },
     [employees, refreshAfterWrite],
@@ -1923,7 +1923,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       if (!res) return false
       setRequests((prev) => prev.filter((r) => r.id !== requestId))
       refreshWithHandovers()
-      toast.success(`${target?.ref ?? 'Leave request'} permanently deleted. Evidence and payment records were preserved.`)
+      toast.success(`${target?.ref ?? 'Ombi la likizo'} limefutwa kabisa. Kumbukumbu za ushahidi na malipo zimehifadhiwa.`)
       return true
     },
     [requests, refreshWithHandovers],
@@ -2003,7 +2003,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
           }),
         )
         await Promise.allSettled([loadLeaveTypes(), loadPolicies(), loadWorkflows()])
-        toast.success(`${input.name.trim()} created. Policy v1 and approval workflow are live.`)
+        toast.success(`${input.name.trim()} imeundwa. Sera v1 na mchakato wa uidhinishaji vinaanza kutumika.`)
       })()
     },
     [loadLeaveTypes, loadPolicies, loadWorkflows],
@@ -2025,7 +2025,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
           })
           .then(() => {
             loadLeaveTypes()
-            toast.success(`${existing.name} type updated.`)
+            toast.success(`Aina ya ${existing.name} imesasishwa.`)
           }),
       )
     },
@@ -2045,7 +2045,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       setLeaveTypes((prev) => prev.filter((t) => t.id !== leaveTypeId))
       setPolicies((prev) => prev.filter((p) => p.leaveTypeId !== leaveTypeId))
       setWorkflowDefs((prev) => prev.filter((w) => w.leaveTypeId !== leaveTypeId))
-      toast.success(`${label} leave type deleted, with its policies and workflow.`)
+      toast.success(`Aina ya likizo ${label} imefutwa, pamoja na sera na mchakato wake.`)
       return true
     },
     [leaveTypes],
@@ -2085,7 +2085,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
           )
         }
         await safe(loadWorkflows())
-        toast.success(`${typeName} workflow updated. New requests use this chain.`)
+        toast.success(`Mchakato wa ${typeName} umesasishwa. Maombi mapya yatatumia mnyororo huu.`)
       })()
     },
     [workflowDefs, typeOf, loadWorkflows],
@@ -2110,7 +2110,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         )
         if (!res) return
         await safe(loadWorkflows())
-        toast.success(`${typeName} workflow v${res.data.version} created — new submissions route through it.`)
+        toast.success(`Mchakato wa ${typeName} v${res.data.version} umeundwa — maombi mapya yatapitia hapo.`)
       })()
     },
     [typeOf, loadWorkflows],
@@ -2126,7 +2126,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         const res = await safe(leaveApi.workflows.update(workflowId, { is_active: active }))
         if (!res) return
         setWorkflowDefs((prev) => prev.map((w) => (w.id === workflowId ? { ...w, isActive: active } : w)))
-        toast.info(`${label} workflow ${active ? 'activated — new submissions will use it.' : 'deactivated — it no longer routes new submissions.'}`)
+        toast.info(`Mchakato wa ${label} ${active ? 'umewashwa — maombi mapya yatautumia.' : 'umezimwa — hautapitisha maombi mapya.'}`)
       })()
     },
     [workflowDefs, typeOf],
@@ -2139,7 +2139,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       const res = await safe(leaveApi.workflows.destroy(workflowId))
       if (!res) return false
       setWorkflowDefs((prev) => prev.filter((w) => w.id !== workflowId))
-      toast.success(`${label} workflow deleted.`)
+      toast.success(`Mchakato wa ${label} umefutwa.`)
       return true
     },
     [workflowDefs, typeOf],
@@ -2154,7 +2154,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       })
       if (changed.length === 0) {
         setRolePermissions(next)
-        toast.success('Role permissions already up to date.')
+        toast.success('Ruhusa za nafasi tayari zimesasishwa.')
         return
       }
       void (async () => {
@@ -2175,15 +2175,15 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
             }
           } catch (err) {
             ok = false
-            toast.error(err instanceof ApiError ? err.message : `Failed to save permissions for ${roleId}.`)
+            toast.error(err instanceof ApiError ? err.message : `Imeshindikana kuhifadhi ruhusa kwa ${roleId}.`)
           }
         }
         if (ok) {
           setRolePermissions(next)
           await safe(loadRolesAndPermissions())
-          toast.success('Role permissions saved and enforced by the backend.')
+          toast.success('Ruhusa za nafasi zimehifadhiwa na kutekelezwa na seva.')
         } else {
-          toast.error('Some role updates failed — permissions unchanged.')
+          toast.error('Baadhi ya masasisho ya nafasi yameshindikana — ruhusa hazijabadilika.')
         }
       })()
     },
@@ -2216,7 +2216,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       )
       if (!res) return null
       await safe(loadEmployees())
-      toast.success(`${res.data.full_name} registered.`)
+      toast.success(`${res.data.full_name} amesajiliwa.`)
       return employeeRow(res.data)
     },
     [loadEmployees],
@@ -2225,7 +2225,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   const addZone = React.useCallback(
     async (input: Omit<CustomZoneConfig, 'id'>): Promise<boolean> => {
       if (!hasPerm('admin.create')) {
-        toast.error('You do not have permission to create zones.')
+        toast.error('Hauna ruhusa ya kuunda kanda.')
         return false
       }
       const res = await safe(
@@ -2250,7 +2250,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         },
       }))
       await safe(loadEmployees())
-      toast.success(`Zone "${res.data.name}" created.`)
+      toast.success(`Kanda "${res.data.name}" imeundwa.`)
       return true
     },
     [hasPerm, loadEmployees],
@@ -2259,7 +2259,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   const updateZone = React.useCallback(
     async (id: string, input: Partial<Omit<CustomZoneConfig, 'id'>>): Promise<boolean> => {
       if (!hasPerm('admin.update')) {
-        toast.error('You do not have permission to edit zones.')
+        toast.error('Hauna ruhusa ya kuhariri kanda.')
         return false
       }
       const res = await safe(
@@ -2287,7 +2287,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         return { ...prev, [id]: { ...base, ...input, id } }
       })
       await safe(loadEmployees())
-      toast.success('Zone updated.')
+      toast.success('Kanda imesasishwa.')
       return true
     },
     [hasPerm, loadEmployees],
@@ -2296,14 +2296,14 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   const removeZone = React.useCallback(
     async (id: string): Promise<boolean> => {
       if (!hasPerm('admin.delete')) {
-        toast.error('You do not have permission to delete zones.')
+        toast.error('Hauna ruhusa ya kufuta kanda.')
         return false
       }
       try {
         await leaveApi.org.deleteZone(id)
       } catch (err) {
         // 422 carries the reason: the zone still holds departments or employees.
-        toast.error(err instanceof ApiError ? err.message : `Failed to delete zone ${id}.`)
+        toast.error(err instanceof ApiError ? err.message : `Imeshindikana kufuta kanda ${id}.`)
         return false
       }
       // Tombstone the id so the seeded constant stops rendering, and drop any
@@ -2319,7 +2319,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         return kept.length === Object.keys(prev).length ? prev : Object.fromEntries(kept)
       })
       await safe(loadEmployees())
-      toast.info('Zone removed.')
+      toast.info('Kanda imeondolewa.')
       return true
     },
     [hasPerm, loadEmployees],
@@ -2328,7 +2328,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   const addDepartment = React.useCallback(
     async (input: Omit<CustomDeptConfig, 'id'>): Promise<boolean> => {
       if (!hasPerm('admin.create')) {
-        toast.error('You do not have permission to create departments.')
+        toast.error('Hauna ruhusa ya kuunda idara.')
         return false
       }
       const res = await safe(leaveApi.org.storeDepartment({ name: input.name, zone_id: input.zoneId }))
@@ -2338,7 +2338,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         [res.data.id]: { id: res.data.id, name: res.data.name, zoneId: res.data.zone_id ?? input.zoneId },
       }))
       await safe(loadEmployees())
-      toast.success(`Department "${res.data.name}" created.`)
+      toast.success(`Idara "${res.data.name}" imeundwa.`)
       return true
     },
     [hasPerm, loadEmployees],
@@ -2347,7 +2347,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   const updateDepartment = React.useCallback(
     async (id: string, input: Partial<Omit<CustomDeptConfig, 'id'>>): Promise<boolean> => {
       if (!hasPerm('admin.update')) {
-        toast.error('You do not have permission to edit departments.')
+        toast.error('Hauna ruhusa ya kuhariri idara.')
         return false
       }
       const res = await safe(
@@ -2367,7 +2367,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         return { ...prev, [id]: { ...base, ...input, id } }
       })
       await safe(loadEmployees())
-      toast.success('Department updated.')
+      toast.success('Idara imesasishwa.')
       return true
     },
     [hasPerm, loadEmployees],
@@ -2376,13 +2376,13 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   const removeDepartment = React.useCallback(
     async (id: string): Promise<boolean> => {
       if (!hasPerm('admin.delete')) {
-        toast.error('You do not have permission to delete departments.')
+        toast.error('Hauna ruhusa ya kufuta idara.')
         return false
       }
       try {
         await leaveApi.org.deleteDepartment(id)
       } catch (err) {
-        toast.error(err instanceof ApiError ? err.message : `Failed to delete department ${id}.`)
+        toast.error(err instanceof ApiError ? err.message : `Imeshindikana kufuta idara ${id}.`)
         return false
       }
       setRemovedDeptIds((prev) => (prev.includes(id) ? prev : [...prev, id]))
@@ -2392,7 +2392,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         return rest
       })
       await safe(loadEmployees())
-      toast.info('Department removed.')
+      toast.info('Idara imeondolewa.')
       return true
     },
     [hasPerm, loadEmployees],
@@ -2401,14 +2401,14 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   const setDepartmentHead = React.useCallback(
     async (departmentId: string, employeeId: string): Promise<boolean> => {
       if (!hasPerm('admin.update')) {
-        toast.error('You do not have permission to appoint department heads.')
+        toast.error('Hauna ruhusa ya kuteua wakuu wa idara.')
         return false
       }
       const res = await safe(leaveApi.org.setDepartmentHead(departmentId, employeeId))
       if (!res) return false
       await safe(loadOrgHeads())
       await safe(loadEmployees())
-      toast.success('Department head updated.')
+      toast.success('Mkuu wa idara amesasishwa.')
       return true
     },
     [hasPerm, loadOrgHeads, loadEmployees],
@@ -2417,14 +2417,14 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   const clearDepartmentHead = React.useCallback(
     async (departmentId: string): Promise<boolean> => {
       if (!hasPerm('admin.update')) {
-        toast.error('You do not have permission to appoint department heads.')
+        toast.error('Hauna ruhusa ya kuteua wakuu wa idara.')
         return false
       }
       const res = await safe(leaveApi.org.clearDepartmentHead(departmentId))
       if (!res) return false
       await safe(loadOrgHeads())
       await safe(loadEmployees())
-      toast.success('Department head cleared.')
+      toast.success('Mkuu wa idara ameondolewa.')
       return true
     },
     [hasPerm, loadOrgHeads, loadEmployees],
@@ -2433,14 +2433,14 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   const setZoneHead = React.useCallback(
     async (zoneId: string, employeeId: string): Promise<boolean> => {
       if (!hasPerm('admin.update')) {
-        toast.error('You do not have permission to appoint zonal heads.')
+        toast.error('Hauna ruhusa ya kuteua wakuu wa kanda.')
         return false
       }
       const res = await safe(leaveApi.org.setZoneHead(zoneId, employeeId))
       if (!res) return false
       await safe(loadOrgHeads())
       await safe(loadEmployees())
-      toast.success('Zonal head updated.')
+      toast.success('Mkuu wa kanda amesasishwa.')
       return true
     },
     [hasPerm, loadOrgHeads, loadEmployees],
@@ -2449,14 +2449,14 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   const clearZoneHead = React.useCallback(
     async (zoneId: string): Promise<boolean> => {
       if (!hasPerm('admin.update')) {
-        toast.error('You do not have permission to appoint zonal heads.')
+        toast.error('Hauna ruhusa ya kuteua wakuu wa kanda.')
         return false
       }
       const res = await safe(leaveApi.org.clearZoneHead(zoneId))
       if (!res) return false
       await safe(loadOrgHeads())
       await safe(loadEmployees())
-      toast.success('Zonal head cleared.')
+      toast.success('Mkuu wa kanda ameondolewa.')
       return true
     },
     [hasPerm, loadOrgHeads, loadEmployees],
@@ -2479,7 +2479,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       if (!res) return false
 
       await safe(loadRolesAndPermissions())
-      toast.success(`Role "${res.data.name}" created. Grant permissions in the matrix and assign holders.`)
+      toast.success(`Nafasi "${res.data.name}" imeundwa. Gawia ruhusa kwenye jedwali na uwape wamiliki.`)
       return true
     },
     [loadRolesAndPermissions],
@@ -2494,7 +2494,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       if (!res) return false
 
       await safe(loadRolesAndPermissions())
-      toast.success('Role updated.')
+      toast.success('Nafasi imesasishwa.')
       return true
     },
     [loadRolesAndPermissions],
@@ -2503,7 +2503,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   const deleteRole = React.useCallback(
     async (roleId: string, reassignTo?: string): Promise<'deleted' | 'blocked' | 'failed'> => {
       if (!hasPerm('admin.delete')) {
-        toast.error('You do not have permission to delete roles.')
+        toast.error('Hauna ruhusa ya kufuta nafasi.')
         return 'failed'
       }
 
@@ -2517,7 +2517,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
           toast.error(err.message)
           return 'blocked'
         }
-        toast.error(err instanceof ApiError ? err.message : `Failed to delete role ${roleId}.`)
+        toast.error(err instanceof ApiError ? err.message : `Imeshindikana kufuta nafasi ${roleId}.`)
         return 'failed'
       }
 
@@ -2526,8 +2526,8 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       syncCustomRoleAssignments(employeesRef.current)
       toast.info(
         reassignTo
-          ? `Role ${roleId} archived — its approval steps now route to ${reassignTo}.`
-          : `Role ${roleId} deleted — its holders and delegations were removed with it.`,
+          ? `Nafasi ${roleId} imehifadhiwa — hatua zake za uidhinishaji sasa zinaelekezwa kwa ${reassignTo}.`
+          : `Nafasi ${roleId} imefutwa — wamiliki na uwakilishi wake umeondolewa pamoja nayo.`,
       )
       return 'deleted'
     },
@@ -2545,7 +2545,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
 
       await safe(loadEmployees())
       syncCustomRoleAssignments(employeesRef.current)
-      toast.success(`${on ? 'Assigned' : 'Removed'} role — ${empName}.`)
+      toast.success(`${on ? 'Imegawiwa' : 'Imeondolewa'} nafasi — ${empName}.`)
       return true
     },
     [loadEmployees, syncCustomRoleAssignments],
@@ -2570,7 +2570,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       if (res) {
         setPositions((prev) => [...prev, res.data])
         await safe(loadPositions())
-        toast.success(`Position "${res.data.title}" created.`)
+        toast.success(`Nafasi "${res.data.title}" imeundwa.`)
         return true
       }
       return false
@@ -2591,7 +2591,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
       if (res) {
         await safe(loadPositions())
         await safe(loadEmployees())
-        toast.success('Position updated.')
+        toast.success('Nafasi imesasishwa.')
         return true
       }
       return false
@@ -2604,7 +2604,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
     if (res) {
       setPositions((prev) => prev.filter((p) => p.id !== id))
       await safe(loadEmployees())
-      toast.success(`Position deleted. ${res.detached_employees ?? 0} employee(s) now have no position assigned.`)
+      toast.success(`Nafasi imefutwa. Watumishi ${res.detached_employees ?? 0} sasa hawana nafasi iliyogawiwa.`)
       return true
     }
     return false

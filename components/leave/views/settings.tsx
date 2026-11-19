@@ -407,17 +407,17 @@ export function SettingsView() {
     if (!editTarget) return
     const name = editDraft.name.trim()
     if (!name) {
-      toast.error('Full name cannot be empty.')
+      toast.error('Jina kamili haliwezi kuwa tupu.')
       return
     }
     const held = editTarget.roleIds ?? []
     const blockedAdd = editDraft.roleIds.find((id) => NON_ASSIGNABLE_ROLES.has(id) && !held.includes(id))
     if (blockedAdd) {
-      toast.error(`${roleName(blockedAdd)} cannot be assigned here. Final Authority is appointed by migration; department and zone heads are appointed from their unit pages.`)
+      toast.error(`${roleName(blockedAdd)} haiwezi kugawiwa hapa. Mamlaka ya Mwisho huteuliwa kwa uhamishaji wa mfumo; wakuu wa idara na kanda huteuliwa kutoka kurasa zao za kitengo.`)
       return
     }
     if (held.includes('FINAL_AUTHORITY') && !editDraft.roleIds.includes('FINAL_AUTHORITY')) {
-      toast.error('Final Authority cannot be removed here — it is managed by migration only.')
+      toast.error('Mamlaka ya Mwisho haiondolewi hapa — inasimamiwa kwa uhamishaji wa mfumo pekee.')
       return
     }
     const ok = await updateEmployee(editTarget.id, { name, email: editDraft.email, payrollNo: editDraft.payrollNo, positionId: editDraft.positionId, departmentId: editDraft.departmentId, zoneId: editDraft.zoneId, gender: editDraft.gender, hireDate: editDraft.hireDate, roleIds: editDraft.roleIds, ...(editDraft.password ? { password: editDraft.password } : {}) })
