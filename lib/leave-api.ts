@@ -466,6 +466,7 @@ export interface RequestCompact {
   employee: { id: string; full_name: string } | null
   leave_type: { code: string; name: string } | null
   assignments: RequestAssignment[]
+  documents?: DocumentDto[]
   signature_path?: string
   signature_hash?: string
 }
@@ -495,6 +496,7 @@ export interface RequestDto {
   policy?: PolicyDto | null
   current_owner?: EmployeeDto | null
   assignments?: WorkflowAssignmentRaw[]
+  documents?: DocumentDto[]
   signature_path?: string
   signature_hash?: string
 }
@@ -1155,6 +1157,25 @@ export const leaveApi = {
         }
         return data as { data: DocumentDto }
       })
+    },
+    /** Documents attached to a request that the caller is allowed to see. */
+    documents: (id: number | string) =>
+      request<{ data: DocumentDto[] }>(`/requests/${id}/documents`),
+    /** Fetch the stored file with the bearer token and hand it to the browser. */
+    downloadDocument: async (id: number | string, docId: number | string) => {
+      const headers: Record<string, string> = { Accept: 'application/json' }
+      if (bearerToken) headers.Authorization = `Bearer ${bearerToken}`
+      const res = await fetch(`/api/requests/${id}/documents/${docId}/download`, { headers })
+      if (!res.ok) throw new ApiError(res.status, 'Document download failed')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.target = '_blank'
+      link.rel = 'noopener'
+      link.click()
+      // Revoke on the next tick so the browser can start the request.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
     },
   },
 

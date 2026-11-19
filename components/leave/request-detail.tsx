@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { ShieldCheck, Clock, FileText, Lock, CheckCircle, Printer, MailOpen } from 'lucide-react'
+import { ShieldCheck, Clock, FileText, Lock, CheckCircle, Printer, MailOpen, Download } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   getEmployee,
@@ -160,6 +160,13 @@ export function RequestDetail({ request, isHr = false, actions }: { request: Lea
                   <p className="text-[13px] font-medium text-foreground truncate">{d.name}</p>
                   <p className="text-[11px] text-muted-foreground truncate">{d.type} · {d.size} · uploaded by {d.uploadedByLabel}</p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => { void leaveApi.requests.downloadDocument(request.id, d.id).catch(() => {}) }}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-semibold text-foreground hover:bg-card"
+                >
+                  <Download className="h-3 w-3" /> Open
+                </button>
                 {d.restricted && (
                   <span className="inline-flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
                     <ShieldCheck className="h-3 w-3" /> Restricted

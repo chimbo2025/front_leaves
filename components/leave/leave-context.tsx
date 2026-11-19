@@ -55,6 +55,7 @@ import {
   type PositionDto,
   type ZoneDto,
   type DepartmentDto,
+  type DocumentDto,
   type AuthAccess,
 } from '@/lib/leave-api'
 import { useAuth } from '@/lib/auth'
@@ -467,9 +468,23 @@ function requestFromRaw(d: RequestDto, slaByRole: Record<string, number>): Leave
     decidedAt: day(d.decided_at) || undefined,
     signaturePath: d.signature_path ?? undefined,
     isPaid: d.is_paid ?? undefined,
-    documents: [],
+    documents: documentsFromDto(d.documents),
     steps: stepsFromRaw(d.assignments ?? [], 1, slaByRole),
   }
+}
+
+function documentsFromDto(ds?: DocumentDto[]): Document[] {
+  return (ds ?? []).map((d) => ({
+    id: String(d.id),
+    name: d.name,
+    type: d.document_type,
+    uploadedBy: d.uploaded_by_user_id ?? '',
+    uploadedByLabel: d.uploaded_by_user_id ? `User ${d.uploaded_by_user_id}` : 'Unknown',
+    // Mirrors LeaveDocumentPolicy's sensitive list (medical/birth evidence).
+    restricted: /medical|antenatal|birth/i.test(d.document_type ?? ''),
+    size: d.size,
+    uploadedAt: day(d.uploaded_at) || TODAY,
+  }))
 }
 
 function requestFromResource(prev: LeaveRequest | null, r: RequestCompact, chain?: ChainItem[] | null, slaByRole?: Record<string, number>): LeaveRequest {
@@ -494,7 +509,7 @@ function requestFromResource(prev: LeaveRequest | null, r: RequestCompact, chain
     decidedAt: day(r.decided_at) || prev?.decidedAt,
     signaturePath: r.signature_path ?? prev?.signaturePath,
     isPaid: r.is_paid ?? prev?.isPaid,
-    documents: prev?.documents ?? [],
+    documents: r.documents ? documentsFromDto(r.documents) : prev?.documents ?? [],
     steps,
   }
 }
