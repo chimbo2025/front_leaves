@@ -448,12 +448,16 @@ export interface RequestAssignment {
 export interface RequestCompact {
   id: number
   ref: string
+  reference_number?: string | null
   employee_id: string | null
   leave_type_id: string
   policy_id: string | null
   start_date: string
   end_date: string | null
   days: number | null
+  approved_days?: number | null
+  letter_body?: string | null
+  letter_issued_at?: string | null
   is_paid?: boolean | null
   reason: string | null
   status: string
@@ -474,12 +478,16 @@ export interface RequestCompact {
 export interface RequestDto {
   id: number
   ref: string
+  reference_number?: string | null
   employee_id: string | null
   leave_type_id: string
   policy_id: string | null
   start_date: string
   end_date: string | null
   days: number | null
+  approved_days?: number | null
+  letter_body?: string | null
+  letter_issued_at?: string | null
   is_paid?: boolean | null
   is_half_day: boolean
   is_emergency_exception: boolean
@@ -1120,7 +1128,7 @@ export const leaveApi = {
       request<{ data: RequestCompact; workflow: ChainItem[] }>(`/requests/${id}/submit`, { method: 'POST' }),
     resubmit: (id: number | string) =>
       request<{ data: RequestCompact; workflow: ChainItem[] }>(`/requests/${id}/resubmit`, { method: 'POST' }),
-    decide: (id: number | string, body: { decision: 'approved' | 'rejected' | 'returned'; comments?: string; end_date?: string | null; signature_hash?: string; signature_image?: string | null; is_paid?: boolean | null }) =>
+    decide: (id: number | string, body: { decision: 'approved' | 'rejected' | 'returned'; comments?: string; end_date?: string | null; signature_hash?: string; signature_image?: string | null; is_paid?: boolean | null; reference_number?: string | null; approved_days?: number | null; letter_body?: string | null }) =>
       request<DecideResponse>(`/requests/${id}/decide`, { method: 'POST', body: JSON.stringify(body) }),
     /** Approval signature seals for the letter — one per recorded decision, with the stored ceremony image inlined as a data URL. */
     signaturesFor: (id: number | string) => request<{ data: SignatureSeal[] }>(`/requests/${id}/signatures`),

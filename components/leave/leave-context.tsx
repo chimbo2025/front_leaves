@@ -20,6 +20,7 @@ import {
   type Status,
   type Employee,
   type LeaveRequest,
+  type LetterData,
   type LeaveType,
   type LeavePolicy,
   type WorkflowDef,
@@ -266,7 +267,7 @@ interface LeaveContextValue {
   orgEligibility: OrgEligibility | null
   submitRequest: (input: NewRequestInput) => LeaveRequest
   updateRequest: (requestId: string, patch: Partial<Pick<LeaveRequest, 'startDate' | 'endDate' | 'reason' | 'isHalfDay'>>) => void
-  decide: (requestId: string, stepOrder: number, decision: 'approved' | 'rejected' | 'returned', comments?: string, endDate?: string, signaturePath?: string, signatureHash?: string, isPaid?: boolean | null) => void
+  decide: (requestId: string, stepOrder: number, decision: 'approved' | 'rejected' | 'returned', comments?: string, endDate?: string, signaturePath?: string, signatureHash?: string, isPaid?: boolean | null, letter?: LetterData | null) => void
   resubmit: (requestId: string, documentName?: string) => void
   withdrawRequest: (requestId: string, reason?: string) => void
   /** Retry-submit an orphaned draft (create succeeded, submit failed). */
@@ -468,6 +469,10 @@ function requestFromRaw(d: RequestDto, slaByRole: Record<string, number>): Leave
     decidedAt: day(d.decided_at) || undefined,
     signaturePath: d.signature_path ?? undefined,
     isPaid: d.is_paid ?? undefined,
+    referenceNumber: d.reference_number ?? undefined,
+    approvedDays: d.approved_days ?? undefined,
+    letterBody: d.letter_body ?? undefined,
+    letterIssuedAt: day(d.letter_issued_at) || undefined,
     documents: documentsFromDto(d.documents),
     steps: stepsFromRaw(d.assignments ?? [], 1, slaByRole),
   }
@@ -509,6 +514,10 @@ function requestFromResource(prev: LeaveRequest | null, r: RequestCompact, chain
     decidedAt: day(r.decided_at) || prev?.decidedAt,
     signaturePath: r.signature_path ?? prev?.signaturePath,
     isPaid: r.is_paid ?? prev?.isPaid,
+    referenceNumber: r.reference_number ?? prev?.referenceNumber,
+    approvedDays: r.approved_days ?? prev?.approvedDays,
+    letterBody: r.letter_body ?? prev?.letterBody,
+    letterIssuedAt: day(r.letter_issued_at) || prev?.letterIssuedAt,
     documents: r.documents ? documentsFromDto(r.documents) : prev?.documents ?? [],
     steps,
   }
@@ -1577,13 +1586,25 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   )
 
   const decide = React.useCallback(
-    (requestId: string, stepOrder: number, decision: 'approved' | 'rejected' | 'returned', comments?: string, endDate?: string, signaturePath?: string, signatureHash?: string, isPaid?: boolean | null) => {
+    (requestId: string, stepOrder: number, decision: 'approved' | 'rejected' | 'returned', comments?: string, endDate?: string, signaturePath?: string, signatureHash?: string, isPaid?: boolean | null, letter?: LetterData | null) => {
       const req = requests.find((r) => r.id === requestId)
       if (!req) return
       void (async () => {
         // signaturePath carries the ceremony image as a data URL — the API
         // stores it with the seal so the official letter can render it.
-        const res = await safe(leaveApi.requests.decide(requestId, { decision, comments, end_date: endDate || null, signature_hash: signatureHash || req.signatureHash, signature_image: signaturePath || req.signaturePath, is_paid: isPaid }))
+        const res = await safe(leaveApi.requests.decide(requestId, {
+          decision,
+          comments,
+          end_date: endDate || null,
+          signature_hash: signatureHash || req.signatureHash,
+          signature_image: signaturePath || req.signaturePath,
+          is_paid: isPaid,
+          // HR final processing: the official reference, granted days and the
+          // response-letter body travel with the final approval.
+          reference_number: letter?.referenceNumber ?? null,
+          approved_days: letter?.approvedDays ?? null,
+          letter_body: letter?.letterBody ?? null,
+        }))
         if (!res) {
           refreshAfterWrite()
           return

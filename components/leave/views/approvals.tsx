@@ -25,6 +25,8 @@ import {
   caseFor,
   pendingHandoversFor,
   type LeaveRequest,
+  type LetterData,
+  type LeaveRequestData,
   type Status,
   type StepStatus,
 } from '@/lib/leave'
@@ -51,6 +53,7 @@ import {
 } from '@/components/leave/shared'
 import { RequestDetail } from '@/components/leave/request-detail'
 import { ApprovalModal } from '@/components/leave/approval-modal'
+import { HrProcessingModal } from '@/components/leave/hr-processing-modal'
 import { PreviousDecisions } from '@/components/leave/previous-decisions'
 import { ApprovalInsightBoxes } from '@/components/leave/approval-insight-boxes'
 import { leaveApi, type ApprovalInsight } from '@/lib/leave-api'
@@ -83,6 +86,10 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
   const [decisionTarget, setDecisionTarget] = useState<{ request: LeaveRequest; decision: 'returned' | 'rejected' } | null>(null)
   const [decisionReason, setDecisionReason] = useState('')
   const [approveIsPaid, setApproveIsPaid] = useState(true)
+  // HR is the final processing step: they write and dispatch the response
+  // letter before the signature ceremony records the approval.
+  const [hrOpen, setHrOpen] = useState(false)
+  const [pendingLetter, setPendingLetter] = useState<LetterData | null>(null)
   const [approvalInsight, setApprovalInsight] = useState<ApprovalInsight | null>(null)
   const [approvalInsightLoading, setApprovalInsightLoading] = useState(false)
 
@@ -164,13 +171,34 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
     ? dayCount(approveTarget.request.startDate, approveReturnDate)
     : 0
 
-  const doDecide = (r: LeaveRequest, decision: 'approved' | 'rejected' | 'returned', endDate?: string, comment?: string, sig?: { path?: string | null; hash?: string | null }, isPaid?: boolean | null) => {
+  // The chain step currently waiting. HR's step is the response-letter step.
+  const currentApprovalStep = approveTarget ? nextStep(approveTarget.request) : undefined
+  const hrFinal = Boolean(approveTarget?.isFinalStep && currentApprovalStep?.role === 'HR')
+
+  const toHrRequestData = (r: LeaveRequest): LeaveRequestData => ({
+    id: r.id,
+    employeeName: employeeName(r.employeeId),
+    leaveType: typeOf(r.leaveTypeId)?.name ?? r.leaveTypeId,
+    startDate: r.startDate,
+    endDate: approveReturnDate || r.endDate,
+    returnDate: approveReturnDate,
+    requestedDays: proposedDays || r.days,
+    isPaidLeave: approveIsPaid,
+    approvers: r.steps
+      .filter((step) => Boolean(step.assigneeId))
+      .map((step) => ({
+        name: step.assigneeName || '—',
+        role: step.roleLabel || String(step.role ?? ''),
+      })),
+  })
+
+  const doDecide = (r: LeaveRequest, decision: 'approved' | 'rejected' | 'returned', endDate?: string, comment?: string, sig?: { path?: string | null; hash?: string | null }, isPaid?: boolean | null, letter?: LetterData | null) => {
     const step = nextStep(r)
     if (!step) return
     // Approvals always go through the signature ceremony; the collected
     // attestation travels with the decision so the API can enforce it.
     // Return/Reject carry no ceremony and the backend seals them unsigned.
-    decide(r.id, step.order, decision, comment, endDate, sig?.path ?? undefined, sig?.hash ?? undefined, isPaid)
+    decide(r.id, step.order, decision, comment, endDate, sig?.path ?? undefined, sig?.hash ?? undefined, isPaid, letter)
   }
 
   // Return and Reject open a reason dialog first - the API now refuses either
@@ -197,6 +225,8 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
     setApproveReturnDate(r.startDate >= TODAY ? r.startDate : TODAY)
     setApproveComment('')
     setSignatureOpen(false)
+    setHrOpen(false)
+    setPendingLetter(null)
   }
 
   const buildMenu = (r: LeaveRequest): RowMenuItem[] => {
@@ -474,7 +504,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
 
       <Modal
         open={approveTarget !== null}
-        onClose={() => { setApproveTarget(null); setSignatureOpen(false) }}
+        onClose={() => { setApproveTarget(null); setSignatureOpen(false); setHrOpen(false); setPendingLetter(null) }}
         title={approveTarget ? `Idhinisha / Approve ${approveTarget.request.ref}` : 'Approve request'}
         subtitle={approveTarget?.isFinalStep ? 'Mwidhinishaji wa mwisho huweka tarehe ya kurudi kazini na muda wa likizo. / The final approver sets the return date and granted duration.' : 'Rekodi uamuzi wako — tarehe ya kurudi na muda zinahifadhiwa kwa mwidhinishaji wa mwisho. / Record your decision.'}
         size="md"
@@ -532,11 +562,17 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
               <Btn
                 variant="emerald"
                 disabled={approveTarget?.isFinalStep === true && !approveReturnDate}
-                onClick={() => setSignatureOpen(true)}
+                onClick={() => {
+                  if (approveTarget && approveTarget.isFinalStep && nextStep(approveTarget.request)?.role === 'HR') {
+                    setHrOpen(true)
+                  } else {
+                    setSignatureOpen(true)
+                  }
+                }}
               >
                 <Check className="w-3.5 h-3.5" /> Grant leave
               </Btn>
-              <Btn variant="outline" onClick={() => { setApproveTarget(null); setSignatureOpen(false) }}>Cancel</Btn>
+              <Btn variant="outline" onClick={() => { setApproveTarget(null); setSignatureOpen(false); setHrOpen(false); setPendingLetter(null) }}>Cancel</Btn>
             </div>
 
             {/* Last step: the signature ceremony. Completing it records the
@@ -556,10 +592,28 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                   approveComment.trim() || undefined,
                   { path, hash },
                   approveIsPaid,
+                  pendingLetter,
                 )
+                setPendingLetter(null)
                 setApproveTarget(null)
               }}
             />
+
+            {/* HR final processing: write the official reference, override the
+                granted days and dispatch the response letter. The signature
+                ceremony then records the approval with the letter payload. */}
+            {hrFinal && (
+              <HrProcessingModal
+                open={hrOpen}
+                onClose={() => setHrOpen(false)}
+                request={toHrRequestData(approveTarget.request)}
+                onDispatch={(letter) => {
+                  setPendingLetter(letter)
+                  setHrOpen(false)
+                  setSignatureOpen(true)
+                }}
+              />
+            )}
           </>
         )}
       </Modal>

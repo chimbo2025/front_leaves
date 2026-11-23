@@ -174,12 +174,19 @@ export interface Document {
 export interface LeaveRequest {
   id: string
   ref: string
+  /** Official reference printed on the response letter ("Kumb. Na"). */
+  referenceNumber?: string
   employeeId: string
   leaveTypeId: string
   policyId: string
   startDate: string
   endDate: string
   days: number
+  /** HR may grant fewer days than the requested period. */
+  approvedDays?: number
+  /** Body of the response letter written by HR at final processing. */
+  letterBody?: string
+  letterIssuedAt?: string
   isPaid?: boolean | null
   isHalfDay?: boolean
   emergency?: boolean
@@ -193,6 +200,36 @@ export interface LeaveRequest {
   steps: ApprovalStep[]
   signaturePath?: string
   signatureHash?: string
+}
+
+/** A named approver shown in the letter's "NAKALA" list. */
+export interface Approver {
+  name: string
+  role: string
+}
+
+/** The letter payload captured by the HR final-processing modal. */
+export interface LetterData {
+  referenceNumber: string
+  approvedDays: number
+  letterBody: string
+}
+
+/**
+ * Everything the HR final-processing modal needs about a request. Kept as a
+ * narrow, serialisable shape so the modal can be rendered from a request row,
+ * a detail payload, or a test fixture without importing the whole store.
+ */
+export interface LeaveRequestData {
+  id: string
+  employeeName: string
+  leaveType: string
+  startDate: string
+  endDate: string
+  returnDate: string
+  requestedDays: number
+  isPaidLeave: boolean
+  approvers: Approver[]
 }
 
 export interface NotificationItem {
@@ -502,19 +539,53 @@ export const roleLabels: Record<ApproverRole, string> = {
   FINAL_AUTHORITY: 'Final Authority — DPP',
 }
 
-export function checkSubmissionWindow(hireDate: string | null | undefined, lastApprovedLeaveEnd: string | null | undefined, startDate: string): string | null {
-  if (!startDate) return null
-  const reference = lastApprovedLeaveEnd ? addDays(lastApprovedLeaveEnd, 1) : (hireDate ?? '')
+const SW_MONTHS = ['Januari', 'Februari', 'Machi', 'Aprili', 'Mei', 'Juni', 'Julai', 'Agosti', 'Septemba', 'Oktoba', 'Novemba', 'Desemba']
+
+function formatSwDate(value: string): string {
+  const d = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return value
+  return `${String(d.getDate()).padStart(2, '0')} ${SW_MONTHS[d.getMonth()]} ${d.getFullYear()}`
+}
+
+/**
+ * Earliest date the employee may start their next leave.
+ *
+ * The reference point is the day after their last approved leave ended; for a
+ * first-ever request it is the hire date. The country rule requires a 30-day
+ * gap, so the earliest start is reference + 30 days.
+ */
+export function earliestSubmittableLeaveStart(
+  hireDate: string | null | undefined,
+  lastApprovedLeaveEnd: string | null | undefined,
+): string | null {
+  const reference = lastApprovedLeaveEnd ? addDays(lastApprovedLeaveEnd, 1) : (hireDate || null)
   if (!reference) return null
-  const earliest = addDays(reference, 30)
+  return addDays(reference, 30)
+}
+
+/**
+ * 30-day rule. Returns the exact Swahili blocker when the requested start date
+ * falls before the earliest permissible leave start, or null when allowed.
+ */
+export function checkLeaveSubmissionWindow(
+  hireDate: string | null | undefined,
+  lastApprovedLeaveEnd: string | null | undefined,
+  startDate: string,
+): string | null {
+  if (!startDate) return null
+
+  const earliest = earliestSubmittableLeaveStart(hireDate, lastApprovedLeaveEnd)
+  if (!earliest) return null
+
   if (startDate < earliest) {
-    const MONTHS = ['Januari', 'Februari', 'Machi', 'Aprili', 'Mei', 'Juni', 'Julai', 'Agosti', 'Septemba', 'Oktoba', 'Novemba', 'Desemba']
-    const d = new Date(`${earliest}T00:00:00`)
-    const fmt = `${String(d.getDate()).padStart(2, '0')} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`
-    return `Hauwezi kuwasilisha ombi hili kwa sasa. Kulingana na tarehe ya likizo yako iliyopita (au tarehe ya kuajiriwa), unaweza kuwasilisha ombi hili siku 30 kabla ya tarehe ya kuanza likizo. Tarehe yako ya kuanza likizo ni ${fmt}.`
+    return `Hauwezi kuwasilisha ombi hili kwa sasa. Kulingana na tarehe ya likizo yako iliyopita (au tarehe ya kuajiriwa), unaweza kuwasilisha ombi hili siku 30 kabla ya tarehe ya kuanza likizo. Tarehe yako ya kuanza likizo ni ${formatSwDate(earliest)}.`
   }
+
   return null
 }
+
+/** @deprecated Use {@link checkLeaveSubmissionWindow}. Kept for call sites. */
+export const checkSubmissionWindow = checkLeaveSubmissionWindow
 export function statusLabel(s: Status): string {
   const map: Record<Status, string> = {
     draft: 'Draft',

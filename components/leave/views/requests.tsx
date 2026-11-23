@@ -37,6 +37,8 @@ import {
   statusLabel,
   type ApprovalStep,
   type LeaveRequest,
+  type LetterData,
+  type LeaveRequestData,
   type Status,
   type LeaveType,
   type Delegation,
@@ -67,6 +69,7 @@ import {
 } from '@/components/leave/shared'
 import { RequestDetail } from '@/components/leave/request-detail'
 import { ApprovalModal } from '@/components/leave/approval-modal'
+import { HrProcessingModal } from '@/components/leave/hr-processing-modal'
 import { PreviousDecisions } from '@/components/leave/previous-decisions'
 import { ApprovalInsightBoxes } from '@/components/leave/approval-insight-boxes'
 
@@ -192,10 +195,16 @@ export function RequestsView() {
   const [approvalInsight, setApprovalInsight] = useState<ApprovalInsight | null>(null)
   const [approvalInsightLoading, setApprovalInsightLoading] = useState(false)
   const [approveComment, setApproveComment] = useState('')
+  // HR is the final processing step: write + dispatch the response letter
+  // before the signature ceremony records the approval.
+  const [hrOpen, setHrOpen] = useState(false)
+  const [pendingLetter, setPendingLetter] = useState<LetterData | null>(null)
   const resetSignature = () => {
     setSignatureOpen(false)
     setApproveComment('')
     setApproveIsPaid(true)
+    setHrOpen(false)
+    setPendingLetter(null)
   }
 
   const requestDecision = (r: LeaveRequest, decision: 'returned' | 'rejected') => {
@@ -400,6 +409,30 @@ export function RequestsView() {
   const approvalProposedDays = approveTarget && approveReturnDate
     ? dayCount(approveTarget.request.startDate, approveReturnDate)
     : 0
+
+  const currentApprovalStep = approveTarget ? nextPending(approveTarget.request) : undefined
+  const hrFinal = Boolean(
+    approveTarget
+    && approveTarget.isFinalStep
+    && currentApprovalStep?.role === 'HR',
+  )
+
+  const toHrRequestData = (r: LeaveRequest): LeaveRequestData => ({
+    id: r.id,
+    employeeName: employeeById.get(r.employeeId)?.name ?? r.employeeId,
+    leaveType: typeOf(r.leaveTypeId)?.name ?? r.leaveTypeId,
+    startDate: r.startDate,
+    endDate: approveReturnDate || r.endDate,
+    returnDate: approveReturnDate,
+    requestedDays: approvalProposedDays || r.days,
+    isPaidLeave: approveIsPaid,
+    approvers: r.steps
+      .filter((step) => Boolean(step.assigneeId))
+      .map((step) => ({
+        name: step.assigneeName || '—',
+        role: step.roleLabel || String(step.role ?? ''),
+      })),
+  })
 
   const buildMenu = (r: LeaveRequest): RowMenuItem[] => {
     const items: RowMenuItem[] = [{ icon: Eye, label: 'View details', onClick: () => setDetail(r) }]
@@ -978,7 +1011,13 @@ export function RequestsView() {
               <Btn
                 variant="emerald"
                 disabled={approveTarget?.isFinalStep === true && !approveReturnDate}
-                onClick={() => setSignatureOpen(true)}
+                onClick={() => {
+                  if (approveTarget && approveTarget.isFinalStep && nextPending(approveTarget.request)?.role === 'HR') {
+                    setHrOpen(true)
+                  } else {
+                    setSignatureOpen(true)
+                  }
+                }}
               >
                 <Check className="w-3.5 h-3.5" /> Grant leave
               </Btn>
@@ -995,11 +1034,26 @@ export function RequestsView() {
                 const target = approveTarget
                 setSignatureOpen(false)
                 if (!target) return
-                decide(target.request.id, target.stepOrder, 'approved', approveComment.trim() || undefined, target.isFinalStep ? approveReturnDate : undefined, path, hash, approveIsPaid)
+                decide(target.request.id, target.stepOrder, 'approved', approveComment.trim() || undefined, target.isFinalStep ? approveReturnDate : undefined, path, hash, approveIsPaid, pendingLetter)
                 resetSignature()
                 setApproveTarget(null)
               }}
             />
+
+            {/* HR final processing: official reference, granted-day override
+                and the response letter, dispatched with the final approval. */}
+            {hrFinal && (
+              <HrProcessingModal
+                open={hrOpen}
+                onClose={() => setHrOpen(false)}
+                request={toHrRequestData(approveTarget.request)}
+                onDispatch={(letter) => {
+                  setPendingLetter(letter)
+                  setHrOpen(false)
+                  setSignatureOpen(true)
+                }}
+              />
+            )}
           </>
         )}
       </Modal>

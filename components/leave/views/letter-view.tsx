@@ -1,14 +1,25 @@
 'use client'
 
-import React from 'react'
+import * as React from 'react'
 import { useLeave } from '@/components/leave/leave-context'
-import { addDays, getDept, getEmployee, getLeaveTypeSafe, getZone, type LeaveRequest, type ApprovalStep } from '@/lib/leave'
-import type { SignatureSeal, ChainItem } from '@/lib/leave-api'
+import {
+  addDays,
+  getDept,
+  getEmployee,
+  getLeaveTypeSafe,
+  getZone,
+  type Approver,
+  type ApprovalStep,
+  type LeaveRequest,
+  type LetterData,
+} from '@/lib/leave'
+import type { ChainItem, SignatureSeal } from '@/lib/leave-api'
 
 const INK = '#14202B'
 const MUTED = '#4A5A66'
-const BORDER = '#C9D2D8'
+const RULE = '#1B2A36'
 const ACCENT = '#0F5C54'
+const FONT_LINK = 'https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400;600;700&display=swap'
 
 const MONTHS = ['Januari', 'Februari', 'Machi', 'Aprili', 'Mei', 'Juni', 'Julai', 'Agosti', 'Septemba', 'Oktoba', 'Novemba', 'Desemba']
 
@@ -35,113 +46,267 @@ function letterSteps(request: LeaveRequest, chain: ChainItem[]): ApprovalStep[] 
   }))
 }
 
-export function LetterView({ request, signatures = [], chain = [] }: { request: LeaveRequest; signatures?: SignatureSeal[]; chain?: ChainItem[] }) {
+function dedupeApprovers(rows: Approver[]): Approver[] {
+  const seen = new Set<string>()
+  return rows.filter((row) => {
+    const name = row.name?.trim()
+    if (!name) return false
+    const key = `${name}::${row.role}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function Paragraphs({ text }: { text: string }) {
+  return (
+    <>
+      {text
+        .split(/\n{2,}/)
+        .map((paragraph) => paragraph.trim())
+        .filter(Boolean)
+        .map((paragraph, index) => (
+          <p key={index} style={{ margin: '0 0 10px' }}>
+            {paragraph.split('\n').map((line, lineIndex, lines) => (
+              <React.Fragment key={lineIndex}>
+                {line}
+                {lineIndex < lines.length - 1 ? <br /> : null}
+              </React.Fragment>
+            ))}
+          </p>
+        ))}
+    </>
+  )
+}
+
+export interface LetterViewProps {
+  request: LeaveRequest
+  /** Kept for existing call sites; the letter itself is signed by the DPP. */
+  signatures?: SignatureSeal[]
+  /** Resolved chain when the request payload does not carry assignments. */
+  chain?: ChainItem[]
+  /** The payload captured by the HR final-processing modal. */
+  letter?: LetterData | null
+  /** Explicit approver list for the NAKALA section. */
+  approvers?: Approver[]
+}
+
+/**
+ * Official DPP Zanzibar response letter. Designed as an A4 sheet (794 × 1123
+ * px at 96 dpi) so browser print / PDF export keeps the government layout.
+ */
+export function LetterView({ request, chain = [], letter = null, approvers }: LetterViewProps) {
   const { employees, allZones, allDepts } = useLeave()
+
   const employee = employees.find((row) => row.id === request.employeeId) ?? getEmployee(request.employeeId)
   const leaveType = getLeaveTypeSafe(request.leaveTypeId)
   const leaveName = leaveType?.name ?? request.leaveTypeId
   const department = allDepts.find((row) => row.id === employee?.departmentId)?.name ?? (employee ? getDept(employee.departmentId)?.name : undefined) ?? '—'
   const zone = allZones.find((row) => row.id === employee?.zoneId)?.name ?? (employee ? getZone(employee.zoneId)?.name : undefined) ?? '—'
-  const approved = request.status === 'approved'
-  const rejected = request.status === 'rejected'
 
-  const steps = letterSteps(request, chain)
-  const distinctApprovers = steps.reduce<ApprovalStep[]>((acc, s) => {
-    if (!acc.find((x) => x.assigneeId && x.assigneeId === s.assigneeId)) acc.push(s)
-    return acc
-  }, [])
+  const reference = letter?.referenceNumber?.trim() || request.referenceNumber?.trim() || request.ref
+  const approvedDays = letter?.approvedDays ?? request.approvedDays ?? request.days
+  const body = letter?.letterBody?.trim() || request.letterBody?.trim() || ''
 
-  const sealsByActor = new Map(signatures.map((s) => [s.actor_id, s]))
+  const issuedAt = request.letterIssuedAt ?? request.decidedAt ?? request.submittedAt ?? request.createdAt
+  const issueDate = formatSwDate(issuedAt)
 
-  const payroll = '—'
+  const returnDate = request.endDate ? addDays(request.endDate, 1) : ''
   const period = request.endDate
     ? `${formatSwDate(request.startDate)} hadi ${formatSwDate(request.endDate)}`
     : `${formatSwDate(request.startDate)} (tarehe ya kurudi itawekwa na mwidhinishaji)`
 
-  // Dynamic copies list: previous approvers in the chain + accountant if paid.
-  const previousApprovers = distinctApprovers.map((s) => s.assigneeName || '—')
-  const copies = [
-    'Mkurugenzi Mipango, Uendeshaji na Rasilimali Watu, Afisi ya Mkurugenzi wa Mashtaka, Zanzibar.',
-    'Mkuu wa Mkoa wa Kaskazini- Unguja',
-    ...previousApprovers.map((name) => `${name} (Mwidhinishaji)`),
-  ]
-  if (request.isPaid) {
-    copies.push('Mhasibu / Accounting Officer, Afisi ya Mkurugenzi wa Mashtaka, Zanzibar.')
-  }
+  // Approvers come from the explicit prop when the caller has it; otherwise
+  // from the resolved chain, and finally from the request's own step history.
+  const chainApprovers: Approver[] = approvers && approvers.length > 0
+    ? approvers
+    : letterSteps(request, chain).map((step) => ({
+        name: step.assigneeName ?? '—',
+        role: step.roleLabel ?? String(step.role ?? ''),
+      }))
+
+  const copyApprovers = dedupeApprovers(chainApprovers)
+
+  const copies = dedupeApprovers([
+    { name: 'Mkurugenzi Mipango, Uendeshaji na Rasilimali Watu, Afisi ya Mkurugenzi wa Mashtaka, Zanzibar.', role: '' },
+    { name: 'Mkuu wa Mkoa wa Kaskazini- Unguja', role: '' },
+    ...copyApprovers,
+    ...(request.isPaid
+      ? [{ name: 'Mhasibu / Accounting Officer, Afisi ya Mkurugenzi wa Mashtaka, Zanzibar.', role: '' }]
+      : []),
+  ])
+
+  // If HR wrote a fully custom body that already states the period, do not
+  // repeat the facts block; otherwise append it so the letter always carries
+  // the start date, end date, return date and the granted number of days.
+  const bodyMentionsPeriod = body.includes(formatSwDate(request.startDate))
 
   return (
-    <div className="letter-page" lang="sw" style={{ width: 794, minHeight: 1123, boxSizing: 'border-box', padding: '44px 58px', background: '#fff', color: INK, display: 'flex', flexDirection: 'column', fontFamily: "'Source Serif 4', Georgia, serif", margin: '0 auto', boxShadow: '0 12px 40px rgba(20,32,43,0.12)' }}>
-      <style>{`@page{size:A4;margin:0}.letter-sans{font-family:'IBM Plex Sans',system-ui,sans-serif}.letter-label{font-size:10px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;color:${MUTED}}`}</style>
-      <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-
-      <header className="letter-sans" style={{ textAlign: 'center', borderBottom: `3px double ${ACCENT}`, paddingBottom: 14 }}>
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
-          <img src="/coat-of-arms-zanzibar.png" alt="Coat of Arms" style={{ height: 64 }} />
+    <div
+      className="letter-page font-serif"
+      lang="sw"
+      style={{
+        width: 794,
+        minHeight: 1123,
+        boxSizing: 'border-box',
+        padding: '40px 56px 48px',
+        background: '#fff',
+        color: INK,
+        display: 'flex',
+        flexDirection: 'column',
+        margin: '0 auto',
+        boxShadow: '0 12px 40px rgba(20,32,43,0.12)',
+      }}
+    >
+      <style>{`@page{size:A4;margin:0}@media print{.letter-page{box-shadow:none!important;margin:0!important}}`}</style>
+      <link href={FONT_LINK} rel="stylesheet" />
+      {/* ── Letterhead ────────────────────────────────────────────────── */}
+      <header style={{ textAlign: 'center' }}>
+        <img
+          src="/coat-of-arms-zanzibar.png"
+          alt="Nembo ya Serikali ya Mapinduzi ya Zanzibar"
+          style={{ height: 68, width: 'auto', objectFit: 'contain', margin: '0 auto 6px', display: 'block' }}
+        />
+        <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: INK }}>
+          Serikali ya Mapinduzi ya Zanzibar
         </div>
-        <div style={{ fontSize: 12, letterSpacing: '.12em', textTransform: 'uppercase', color: MUTED }}>SERIKALI YA MAPINDUZI YA ZANZIBAR</div>
-        <h1 style={{ margin: '6px 0 2px', color: ACCENT, fontSize: 21, textTransform: 'uppercase' }}>AFISI YA MKURUGENZI WA MASHTAKA</h1>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: MUTED, marginTop: 8 }}>
-          <div style={{ textAlign: 'left' }}>
-            S.L.P 1327, MIEMBENI - ZANZIBAR<br />
+        <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: ACCENT, marginTop: 2 }}>
+          Afisi ya Mkurugenzi wa Mashtaka
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24, marginTop: 10, fontSize: 10.5, color: MUTED, textAlign: 'left' }}>
+          <div>
+            S.L.P 1327, MIEMBENI - ZANZIBAR
+            <br />
             Barua Pepe: dppznz@dppznz.go.tz
           </div>
           <div style={{ textAlign: 'right' }}>
-            Simu: +255-24-2233567<br />
-            Nukushi: +255-24-2233564<br />
+            Simu: +255-24-2233567
+            <br />
+            Nukushi: +255-24-2233564
+            <br />
             Tovuti: www.dppznz.go.tz
           </div>
         </div>
+
+        <div style={{ borderBottom: `2.5px solid ${RULE}`, marginTop: 12 }} />
       </header>
 
-      <div className="letter-sans" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 24, marginTop: 18, fontSize: 13 }}>
+      {/* ── Reference / date ──────────────────────────────────────────── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 24, marginTop: 20, fontSize: 13 }}>
         <div>
-          <span className="letter-label">Kumb. Na</span> <strong>{request.ref}</strong>
+          <strong>Kumb. Na:</strong> {reference}
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: ACCENT }}>{employee?.name ?? '—'}</div>
-          <div style={{ fontSize: 12 }}>{employee?.title ?? '—'}</div>
-          <div style={{ fontSize: 11, color: MUTED }}>{department} · {zone}</div>
-          <div style={{ fontSize: 11, color: MUTED, marginTop: 6 }}>
-            <span className="letter-label">Tarehe</span> {formatSwDate(request.decidedAt ?? request.submittedAt ?? request.createdAt)}
-          </div>
-        </div>
+        <div style={{ textAlign: 'right' }}>{issueDate}</div>
       </div>
 
-      <div className="letter-sans" style={{ marginTop: 18, fontSize: 13, lineHeight: 1.6 }}>
+      {/* ── Addressee ─────────────────────────────────────────────────── */}
+      <div style={{ marginTop: 18, fontSize: 13, lineHeight: 1.55 }}>
         <div>NDG. {employee?.name ?? '—'}</div>
         <div>AFISI YA MKURUGENZI WA MASHTAKA,</div>
         <div>ZANZIBAR.</div>
       </div>
 
-      <h2 className="letter-sans" style={{ margin: '20px 0 10px', padding: '8px 0', borderTop: `1px solid ${BORDER}`, borderBottom: `1px solid ${BORDER}`, fontSize: 15, textTransform: 'uppercase', textAlign: 'center', fontWeight: 700 }}>
+      {/* ── Subject ───────────────────────────────────────────────────── */}
+      <h2
+        style={{
+          margin: '22px 0 16px',
+          fontSize: 14.5,
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          textAlign: 'center',
+          textDecoration: 'underline',
+          textUnderlineOffset: 4,
+        }}
+      >
         KUH: OMBI LA LIKIZO YA {leaveName.toUpperCase()}
       </h2>
 
-      <div className="letter-sans" style={{ fontSize: 14, lineHeight: 1.65, textAlign: 'justify' }}>
-        {approved && <p>{`Ombi lako la ${leaveName} la mwaka ${new Date(request.decidedAt ?? request.submittedAt ?? request.createdAt).getFullYear()} limeidhinishwa.`}</p>}
-        {rejected && <p>{`Ombi lako la ${leaveName} limekataliwa. Hati hii inathibitisha uamuzi wa ombi lako.`}</p>}
-        <p>Sababu ya ombi: {request.reason?.trim() || '—'}</p>
-        <p>Kipindi cha likizo: <strong>{period}</strong>. Tarehe ya kurudi kazini: <strong>{approved && request.endDate ? formatSwDate(addDays(request.endDate, 1)) : '—'}</strong>.</p>
-        <p>Idadi ya siku zilizoidhinishwa: <strong>{request.days ?? '—'}</strong>. {request.isPaid ? <span style={{ color: '#0B5E40', fontWeight: 700 }}>Likizo hii italipwa (Inalipwa).</span> : null}</p>
+      {/* ── Body ──────────────────────────────────────────────────────── */}
+      <div style={{ flex: 1, fontSize: 13.5, lineHeight: 1.72, textAlign: 'justify' }}>
+        {body ? (
+          <Paragraphs text={body} />
+        ) : (
+          <>
+            <p style={{ margin: '0 0 10px' }}>
+              Ombi lako la {leaveName} la mwaka {new Date(issuedAt).getFullYear()} limeidhinishwa.
+            </p>
+            <p style={{ margin: '0 0 10px' }}>Sababu ya ombi: {request.reason?.trim() || '—'}</p>
+          </>
+        )}
+
+        {!bodyMentionsPeriod && (
+          <p style={{ margin: '0 0 10px' }}>
+            Kipindi cha likizo: <strong>{period}</strong>. Tarehe ya kurudi kazini:{' '}
+            <strong>{returnDate ? formatSwDate(returnDate) : '—'}</strong>. Idadi ya siku zilizoidhinishwa:{' '}
+            <strong>{approvedDays ?? '—'}</strong>.
+          </p>
+        )}
+
+        <p style={{ margin: '0 0 10px' }}>
+          {request.isPaid ? (
+            <span style={{ color: '#0B5E40', fontWeight: 700 }}>Likizo hii italipwa / Inalipwa (Paid).</span>
+          ) : (
+            <span style={{ color: '#9B1C1C', fontWeight: 700 }}>Likizo hii hailipwi (Unpaid).</span>
+          )}
+        </p>
       </div>
 
-      <div style={{ marginTop: 40, textAlign: 'right' }} className="letter-sans">
+      {/* ── Sign-off ──────────────────────────────────────────────────── */}
+      <div style={{ marginTop: 28, textAlign: 'right', fontSize: 13, lineHeight: 1.55 }}>
         <div>Ahsante</div>
-        <div style={{ marginTop: 24 }}>..................................</div>
-        <div style={{ fontWeight: 700, marginTop: 8 }}>MWANDAWA I. OTHMAN,</div>
+        <div style={{ marginTop: 26, letterSpacing: '.06em' }}>..................................</div>
+        <div style={{ fontWeight: 700, marginTop: 6 }}>MWANDAWA I. OTHMAN,</div>
         <div>/MKURUGENZI WA MASHTAKA,</div>
         <div>AFISI YA MKURUGENZI WA MASHTAKA,</div>
         <div>ZANZIBAR.</div>
       </div>
 
-      <section className="letter-sans" style={{ marginTop: 32, fontSize: 12 }}>
-        <div style={{ fontWeight: 700, marginBottom: 6 }}>NAKALA:-</div>
-        <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.7 }}>
-          {copies.map((c, i) => <li key={i}>{c}</li>)}
-        </ul>
+      {/* ── Copies ────────────────────────────────────────────────────── */}
+      <section style={{ marginTop: 26, fontSize: 11.5, lineHeight: 1.65 }}>
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>NAKALA:-</div>
+        <ol style={{ margin: 0, paddingLeft: 18 }}>
+          {copies.map((copy, index) => (
+            <li key={`${copy.name}-${index}`}>
+              {copy.name}
+              {copy.role ? ` (${copy.role})` : ''}
+            </li>
+          ))}
+        </ol>
       </section>
+
+      <div style={{ marginTop: 14, fontSize: 9.5, color: MUTED, textAlign: 'center' }}>
+        {department} · {zone}
+      </div>
     </div>
   )
+}
+
+/** Print the letter through an isolated iframe so surrounding app chrome is excluded. */
+export function printLetter(page: HTMLElement): void {
+  const iframe = document.createElement('iframe')
+  iframe.setAttribute('aria-hidden', 'true')
+  iframe.style.cssText = 'position:absolute;left:-10000px;top:0;width:794px;height:1123px;border:0;visibility:hidden'
+  document.body.appendChild(iframe)
+  const doc = iframe.contentDocument
+  if (!doc) {
+    iframe.remove()
+    return
+  }
+  doc.open()
+  doc.write(`<!doctype html><html lang="sw"><head><meta charset="utf-8"><title>Barua ya Likizo</title><link href="${FONT_LINK}" rel="stylesheet"></head><body style="margin:0;background:#fff">${page.outerHTML}</body></html>`)
+  doc.close()
+  const go = () => {
+    try {
+      iframe.contentWindow?.focus()
+      iframe.contentWindow?.print()
+    } finally {
+      window.setTimeout(() => iframe.remove(), 1500)
+    }
+  }
+  const fonts = doc.fonts?.ready as Promise<unknown> | undefined
+  if (fonts) void Promise.race([fonts, new Promise((resolve) => window.setTimeout(resolve, 1200))]).then(go, go)
+  else window.setTimeout(go, 300)
 }
 
 export default LetterView
