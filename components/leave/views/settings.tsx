@@ -263,6 +263,10 @@ export function SettingsView() {
     hire_date: '',
     role_ids: [] as string[],
   })
+  const [zoneSearch, setZoneSearch] = useState('')
+  const [deptSearch, setDeptSearch] = useState('')
+  const [divSearch, setDivSearch] = useState('')
+  const [unitSearch, setUnitSearch] = useState('')
 
   const scopeZone = supervisorMode ? 'all' : employee.zoneId
   const canManage = supervisorMode || can('admin', 'create')
@@ -462,7 +466,7 @@ export function SettingsView() {
 
   const openPosCreate = () => {
     setPosEdit(null)
-    setPosDraft({ title: '', departmentId: positionDepartmentOptions[0]?.id ?? '', divisionId: '', unitId: '' })
+    setPosDraft({ title: '', departmentId: '', divisionId: '', unitId: '' })
     setPosOpen(true)
   }
 
@@ -470,7 +474,7 @@ export function SettingsView() {
     setPosEdit(p)
     setPosDraft({
       title: p.title,
-      departmentId: p.department_id ?? positionDepartmentOptions[0]?.id ?? '',
+      departmentId: p.department_id ?? '',
       divisionId: p.division_id ?? '',
       unitId: p.unit_id ?? '',
     })
@@ -514,9 +518,6 @@ export function SettingsView() {
   )
 
   const seedRegDraft = () => {
-    const zoneId = allZones[0]?.id ?? ''
-    const deptId = departmentsForZone(zoneId)[0]?.id ?? ''
-    const posId = positionsForPlacement(deptId, '', '')[0]?.id ?? ''
     setRegDraft({
       full_name: '',
       payroll_no: '',
@@ -524,11 +525,11 @@ export function SettingsView() {
       username: '',
       password: 'Password123',
       passwordCustom: false,
-      position_id: posId,
-      department_id: deptId,
+      position_id: '',
+      department_id: '',
       division_id: '',
       unit_id: '',
-      zone_id: zoneId,
+      zone_id: '',
       gender: 'M',
       hire_date: '',
       role_ids: [],
@@ -1585,13 +1586,23 @@ export function SettingsView() {
               placeholder="Select approval roles…"
               options={rolePickerOptions()}
               value={regDraft.role_ids}
+              searchable
+              searchPlaceholder="Search roles…"
               onChange={(next) => setRegDraft((d) => ({ ...d, role_ids: next }))}
             />
           </div>
 
           {/* Placement — zone → department → optional division; units are independent. */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-            <SelectInput label="Zone" value={regDraft.zone_id} onChange={(e) => {
+            <div className="space-y-1.5">
+              <input
+                type="text"
+                placeholder="Search zone…"
+                value={zoneSearch}
+                onChange={(e) => setZoneSearch(e.target.value)}
+                className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-[12px] text-foreground outline-none focus:border-teal-600"
+              />
+              <SelectInput label="Zone" value={regDraft.zone_id} onChange={(e) => {
               const zoneId = e.target.value
               setRegDraft((d) => {
                 const deptId = departmentsForZone(zoneId)[0]?.id ?? ''
@@ -1599,11 +1610,21 @@ export function SettingsView() {
                 return { ...d, zone_id: zoneId, department_id: deptId, division_id: '', position_id: pos[0]?.id ?? '' }
               })
             }}>
-              {allZones.map((z) => (
+              <option value="">— none —</option>
+              {allZones.filter((z) => !zoneSearch || z.name.toLowerCase().includes(zoneSearch.toLowerCase())).map((z) => (
                 <option key={z.id} value={z.id}>{z.name}</option>
               ))}
             </SelectInput>
-            <SelectInput label="Department" value={regDraft.department_id} onChange={(e) => {
+            </div>
+            <div className="space-y-1.5">
+              <input
+                type="text"
+                placeholder="Search department…"
+                value={deptSearch}
+                onChange={(e) => setDeptSearch(e.target.value)}
+                className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-[12px] text-foreground outline-none focus:border-teal-600"
+              />
+              <SelectInput label="Department" value={regDraft.department_id} onChange={(e) => {
               const deptId = e.target.value
               setRegDraft((d) => {
                 const pos = positionsForPlacement(deptId, '', d.unit_id)
@@ -1611,11 +1632,20 @@ export function SettingsView() {
               })
             }}>
               <option value="">— select —</option>
-              {regDepartments.map((d) => (
+              {regDepartments.filter((d) => !deptSearch || d.name.toLowerCase().includes(deptSearch.toLowerCase())).map((d) => (
                 <option key={d.id} value={d.id}>{d.name}</option>
               ))}
             </SelectInput>
-            <SelectInput label="Division" value={regDraft.division_id} onChange={(e) => {
+            </div>
+            <div className="space-y-1.5">
+              <input
+                type="text"
+                placeholder="Search division…"
+                value={divSearch}
+                onChange={(e) => setDivSearch(e.target.value)}
+                className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-[12px] text-foreground outline-none focus:border-teal-600"
+              />
+              <SelectInput label="Division" value={regDraft.division_id} onChange={(e) => {
               const divisionId = e.target.value
               setRegDraft((d) => ({
                 ...d,
@@ -1624,11 +1654,20 @@ export function SettingsView() {
               }))
             }}>
               <option value="">— none —</option>
-              {regDivisions.map((d) => (
+              {regDivisions.filter((d) => !divSearch || d.name.toLowerCase().includes(divSearch.toLowerCase())).map((d) => (
                 <option key={d.id} value={d.id}>{d.name}</option>
               ))}
             </SelectInput>
-            <SelectInput label="Independent unit" value={regDraft.unit_id} onChange={(e) => {
+            </div>
+            <div className="space-y-1.5">
+              <input
+                type="text"
+                placeholder="Search unit…"
+                value={unitSearch}
+                onChange={(e) => setUnitSearch(e.target.value)}
+                className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-[12px] text-foreground outline-none focus:border-teal-600"
+              />
+              <SelectInput label="Independent unit" value={regDraft.unit_id} onChange={(e) => {
               const unitId = e.target.value
               setRegDraft((d) => ({
                 ...d,
@@ -1637,10 +1676,11 @@ export function SettingsView() {
               }))
             }}>
               <option value="">— none —</option>
-              {regUnits.map((d) => (
+              {regUnits.filter((d) => !unitSearch || d.name.toLowerCase().includes(unitSearch.toLowerCase())).map((d) => (
                 <option key={d.id} value={d.id}>{d.name}</option>
               ))}
             </SelectInput>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
@@ -1929,7 +1969,7 @@ export function SettingsView() {
         footer={
           <div className="flex items-center gap-2">
             <Btn variant="ghost" onClick={() => setPosOpen(false)} disabled={posBusy}>Cancel</Btn>
-            <Btn onClick={() => void savePos()} disabled={!posDraft.title.trim() || !posDraft.departmentId || posBusy}>
+            <Btn onClick={() => void savePos()} disabled={!posDraft.title.trim() || posBusy}>
               <Save className="w-3.5 h-3.5" /> {posBusy ? 'Saving…' : posEdit ? 'Save changes' : 'Create position'}
             </Btn>
           </div>
@@ -1939,7 +1979,7 @@ export function SettingsView() {
           <TextInput label="Position title" value={posDraft.title} onChange={(e) => setPosDraft({ ...posDraft, title: e.target.value })} placeholder="e.g. Head of Legal Research & Advisory" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             <SelectInput label="Department" value={posDraft.departmentId} onChange={(e) => setPosDraft({ ...posDraft, departmentId: e.target.value, divisionId: '' })}>
-              <option value="">— select department —</option>
+              <option value="">— none —</option>
               {positionDepartmentOptions.map((d) => (
                 <option key={d.id} value={d.id}>{d.name}</option>
               ))}
