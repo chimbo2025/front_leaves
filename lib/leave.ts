@@ -502,6 +502,19 @@ export const roleLabels: Record<ApproverRole, string> = {
   FINAL_AUTHORITY: 'Final Authority — DPP',
 }
 
+export function checkSubmissionWindow(hireDate: string | null | undefined, lastApprovedLeaveEnd: string | null | undefined, startDate: string): string | null {
+  if (!startDate) return null
+  const reference = lastApprovedLeaveEnd ? addDays(lastApprovedLeaveEnd, 1) : (hireDate ?? '')
+  if (!reference) return null
+  const earliest = addDays(reference, 30)
+  if (startDate < earliest) {
+    const MONTHS = ['Januari', 'Februari', 'Machi', 'Aprili', 'Mei', 'Juni', 'Julai', 'Agosti', 'Septemba', 'Oktoba', 'Novemba', 'Desemba']
+    const d = new Date(`${earliest}T00:00:00`)
+    const fmt = `${String(d.getDate()).padStart(2, '0')} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`
+    return `Hauwezi kuwasilisha ombi hili kwa sasa. Kulingana na tarehe ya likizo yako iliyopita (au tarehe ya kuajiriwa), unaweza kuwasilisha ombi hili siku 30 kabla ya tarehe ya kuanza likizo. Tarehe yako ya kuanza likizo ni ${fmt}.`
+  }
+  return null
+}
 export function statusLabel(s: Status): string {
   const map: Record<Status, string> = {
     draft: 'Draft',
