@@ -126,22 +126,18 @@ export function LetterView({ request, signatures = [], chain = [] }: { request: 
       <style>{`@page{size:A4;margin:0}.letter-sans{font-family:'IBM Plex Sans',system-ui,sans-serif}.letter-label{font-size:10px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;color:${MUTED}}`}</style>
       <link href={FONT_LINK} rel="stylesheet" />
       <header className="letter-sans" style={{ textAlign: 'center', borderBottom: `3px double ${ACCENT}`, paddingBottom: 14 }}>
-        <div style={{ fontSize: 12, letterSpacing: '.12em', textTransform: 'uppercase', color: MUTED }}>Jamhuri ya Mapinduzi ya Zanzibar</div>
-        <h1 style={{ margin: '6px 0 2px', color: ACCENT, fontSize: 21, textTransform: 'uppercase' }}>Ofisi ya Mkurugenzi wa Mashtaka</h1>
-        <div style={{ color: MUTED, fontSize: 12 }}>Zanzibar</div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: ACCENT, textTransform: 'uppercase' }}>DOKEZO</div>
       </header>
 
       {/* Reference line on the left; requester block TOP-RIGHT, in the official letter position. */}
       <div className="letter-sans" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 24, marginTop: 18, fontSize: 13 }}>
         <div>
-          <span className="letter-label">Kumbukumbu</span> <strong>{request.ref}</strong><br />
           <div style={{ border: `2px solid ${outcomeColor}`, color: outcomeColor, borderRadius: 8, padding: '5px 12px', fontWeight: 700, display: 'inline-block', marginTop: 12, fontSize: 13 }}>{outcome}</div>
         </div>
         <div style={{ textAlign: 'right', lineHeight: 1.55 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: ACCENT }}>{employee?.name ?? '—'}</div>
           <div style={{ fontSize: 12 }}>{employee?.title ?? '—'}</div>
           <div style={{ fontSize: 11, color: MUTED }}>{department} · {zone}</div>
-          <div style={{ fontSize: 10, color: MUTED, marginTop: 4 }}>Namba ya utumishi: {payroll}</div>
           <div style={{ fontSize: 11, color: MUTED, marginTop: 6 }}>
             <span className="letter-label">Tarehe</span> {formatSwDate(request.decidedAt ?? request.submittedAt ?? request.createdAt)}
           </div>
@@ -149,10 +145,11 @@ export function LetterView({ request, signatures = [], chain = [] }: { request: 
       </div>
 
       <h2 className="letter-sans" style={{ margin: '20px 0 10px', padding: '8px 0', borderTop: `1px solid ${BORDER}`, borderBottom: `1px solid ${BORDER}`, fontSize: 15, textTransform: 'uppercase' }}>
-        YAH: Maombi ya {leaveName} — {approved ? 'yameidhinishwa' : rejected ? 'yamekataliwa' : 'hali ya ombi'}
+        KUH: OMBI LA LIKIZO YA {leaveName.toUpperCase()}
       </h2>
       <div className="letter-sans" style={{ fontSize: 14, lineHeight: 1.65, textAlign: 'justify' }}>
-        <p>{approved ? `Ombi lako la ${leaveName} la mwaka ${new Date(request.decidedAt ?? request.submittedAt ?? request.createdAt).getFullYear()} limeidhinishwa.` : rejected ? `Ombi lako la ${leaveName} limekataliwa. Hati hii inathibitisha uamuzi wa ombi lako.` : `Hii ni taarifa ya ombi lako la ${leaveName} na hali yake ya sasa.`}</p>
+        {approved && <p>{`Ombi lako la ${leaveName} la mwaka ${new Date(request.decidedAt ?? request.submittedAt ?? request.createdAt).getFullYear()} limeidhinishwa.`}</p>}
+        {rejected && <p>{`Ombi lako la ${leaveName} limekataliwa. Hati hii inathibitisha uamuzi wa ombi lako.`}</p>}
         <p>Sababu ya ombi: {request.reason?.trim() || '—'}</p>
         <p>Kipindi cha likizo: <strong>{period}</strong>. Tarehe ya kurudi kazini: <strong>{approved && request.endDate ? formatSwDate(addDays(request.endDate, 1)) : '—'}</strong>.</p>
       </div>
@@ -173,7 +170,7 @@ export function LetterView({ request, signatures = [], chain = [] }: { request: 
           <p style={{ fontSize: 12, color: MUTED, margin: '10px 0 0' }}>Hakuna hatua za kuidhinisha zilizorekodiwa.</p>
         ) : (
           <ol style={{ listStyle: 'none', margin: '6px 0 0', padding: 0 }}>
-            {distinctApprovers.map((s, i) => {
+            {distinctApprovers.slice(-1).map((s, i) => {
               const state = approverState(s)
               const seal = sealsByActor.get(s.assigneeId ?? '')
               return (

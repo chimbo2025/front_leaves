@@ -442,7 +442,7 @@ export function RequestsView() {
     <div className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-8 py-6 space-y-6">
       <SectionHeading
         title="Leave requests"
-        subtitle="Create a new request or track the status of existing applications."
+        subtitle="Unda ombi jipya au fuatilia hali ya maombi yaliyopo."
         actions={
           <Btn onClick={() => setCreateOpen(true)}>
             <Plus className="w-4 h-4" /> New leave request
@@ -643,7 +643,7 @@ export function RequestsView() {
         title="New leave request"
         subtitle={
           supervisorMode
-            ? 'Leave type, policy, balance and approval chain all apply live.'
+            ? 'Aina ya likizo, sera, salio na mnyororo wa uidhinishaji vinaendeshwa moja kwa moja.'
             : 'Leave type, policy and balance apply live.'
         }
         size="lg"
@@ -654,19 +654,6 @@ export function RequestsView() {
         }
       >
         <div className="space-y-5">
-          {supervisorMode && (
-            <SelectInput
-              label="Applicant"
-              value={form.employeeId}
-              onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
-            >
-              {employees.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.name} — {e.title}
-                </option>
-              ))}
-            </SelectInput>
-          )}
 
           <SelectInput
             label="Leave type"
@@ -714,23 +701,6 @@ export function RequestsView() {
 
           <p className="text-[12px] text-muted-foreground">Return date set at approval.</p>
 
-          <div className="flex flex-wrap gap-4">
-            <label className="flex items-center gap-2 text-[12px] text-foreground">
-              <input
-                type="checkbox"
-                checked={form.isHalfDay}
-                disabled={!policy?.allowHalfDay}
-                onChange={(e) => setForm({ ...form, isHalfDay: e.target.checked })}
-                className="accent-teal-700"
-              />
-              Half-day request {policy?.allowHalfDay ? '' : '(not allowed by policy)'}
-            </label>
-          </div>
-          {form.isHalfDay && rawDays > 1 && (
-            <p className="text-[11px] text-amber-600 dark:text-amber-400">
-              Half-day deduction applies to {fmtShort(form.startDate)}; the full date range would be {rawDays} days.
-            </p>
-          )}
 
 
 
@@ -779,20 +749,6 @@ export function RequestsView() {
             </div>
             {form.documentFile && <p className="text-[11px] text-muted-foreground mt-1">Selected: {form.documentFile.name}</p>}
           </div>
-
-          <Panel
-            title="Policy compliance"
-            subtitle={policy ? `Policy v${policy.version} — ${typeOf(form.leaveTypeId)?.name} · ${typeOf(form.leaveTypeId)?.swahili}` : 'No policy configured for this type'}
-          >
-            <div className="space-y-2.5">
-              {checks.map((c, i) => (
-                <div key={i} className={cn('flex items-start gap-2.5 rounded-xl border px-3 py-2.5', c.toneCls)}>
-                  <c.Icon className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                  <p className="text-[12px] leading-snug text-foreground/90">{c.text}</p>
-                </div>
-              ))}
-            </div>
-          </Panel>
 
           {supervisorMode && (
             <Panel title="Approval chain" subtitle="Assigned from zone, department, role and duration">
