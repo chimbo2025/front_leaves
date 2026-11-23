@@ -223,8 +223,8 @@ interface LeaveContextValue {
   employees: EmployeeRow[]
   positions: PositionDto[]
   positionTitle: (id: string) => string
-  createPosition: (input: { title: string; departmentId: string; divisionId?: string | null; unitId?: string | null }) => Promise<boolean>
-  updatePosition: (id: string, patch: { title?: string; departmentId?: string; divisionId?: string | null; unitId?: string | null }) => Promise<boolean>
+  createPosition: (input: { title: string; departmentId?: string | null; divisionId?: string | null; unitId?: string | null }) => Promise<boolean>
+  updatePosition: (id: string, patch: { title?: string; departmentId?: string | null; divisionId?: string | null; unitId?: string | null }) => Promise<boolean>
   deletePosition: (id: string) => Promise<boolean>
   supervisorMode: boolean
   access: AuthAccess | null
@@ -2579,7 +2579,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   )
 
   const createPosition = React.useCallback(
-    async (input: { title: string; departmentId: string; divisionId?: string | null; unitId?: string | null }) => {
+    async (input: { title: string; departmentId?: string | null; divisionId?: string | null; unitId?: string | null }) => {
       const res = await safe(
         leaveApi.org.storePosition({
           title: input.title.trim(),
@@ -2600,7 +2600,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   )
 
   const updatePosition = React.useCallback(
-    async (id: string, patch: { title?: string; departmentId?: string; divisionId?: string | null; unitId?: string | null }) => {
+    async (id: string, patch: { title?: string; departmentId?: string | null; divisionId?: string | null; unitId?: string | null }) => {
       const res = await safe(
         leaveApi.org.updatePosition(id, {
           title: patch.title?.trim(),

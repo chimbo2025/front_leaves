@@ -1024,9 +1024,9 @@ export const leaveApi = {
       request<{ data: EmployeeDto & { unscoped_role_ids: string[] } }>(`/org/employees/${employeeId}/roles/${roleId}`, { method: 'POST' }),
     revokeRole: (employeeId: string, roleId: string) =>
       request<{ data: EmployeeDto & { unscoped_role_ids: string[] } }>(`/org/employees/${employeeId}/roles/${roleId}`, { method: 'DELETE' }),
-    storePosition: (body: { title: string; department_id: string; division_id?: string | null; unit_id?: string | null; zone_id?: string | null }) =>
+    storePosition: (body: { title: string; department_id?: string | null; division_id?: string | null; unit_id?: string | null; zone_id?: string | null }) =>
       request<{ data: PositionDto }>('/org/positions', { method: 'POST', body: JSON.stringify(body) }),
-    updatePosition: (id: string, body: Partial<{ title: string; department_id: string; division_id?: string | null; unit_id?: string | null; zone_id?: string | null }>) =>
+    updatePosition: (id: string, body: Partial<{ title: string; department_id?: string | null; division_id?: string | null; unit_id?: string | null; zone_id?: string | null }>) =>
       request<{ data: PositionDto }>(`/org/positions/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     deletePosition: (id: string) => request<{ message: string; detached_employees?: number }>(`/org/positions/${id}`, { method: 'DELETE' }),
     storeZone: (body: { name: string; short?: string | null; is_hq?: boolean; is_pemba?: boolean; is_coordination?: boolean }) =>

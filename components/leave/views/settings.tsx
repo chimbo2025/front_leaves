@@ -486,7 +486,7 @@ export function SettingsView() {
     setPosBusy(true)
     const payload = {
       title: posDraft.title.trim(),
-      departmentId: posDraft.departmentId,
+      departmentId: posDraft.departmentId || null,
       divisionId: posDraft.divisionId || null,
       unitId: posDraft.unitId || null,
     }
