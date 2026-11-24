@@ -198,7 +198,7 @@ export function SettingsView() {
   const [activeFilter, setActiveFilter] = useState('all')
   const [viewTarget, setViewTarget] = useState<EmployeeRow | null>(null)
   const [editTarget, setEditTarget] = useState<EmployeeRow | null>(null)
-  const [editDraft, setEditDraft] = useState({ name: '', title: '', email: '', payrollNo: '', positionId: '', departmentId: '', zoneId: '', gender: 'M' as 'M' | 'F', hireDate: '', roleIds: [] as string[], password: '' })
+  const [editDraft, setEditDraft] = useState({ name: '', title: '', email: '', payrollNo: '', positionId: '', departmentId: '', divisionId: '', unitId: '', zoneId: '', gender: 'M' as 'M' | 'F', hireDate: '', roleIds: [] as string[], password: '' })
   const [toggleTarget, setToggleTarget] = useState<EmployeeRow | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<EmployeeRow | null>(null)
   const [deleteReason, setDeleteReason] = useState('')
@@ -388,7 +388,7 @@ export function SettingsView() {
 
   const buildMenu = (e: EmployeeRow): RowMenuItem[] => [
     { icon: Eye, label: 'View profile', onClick: () => setViewTarget(e) },
-    { icon: Pencil, label: 'Edit profile', onClick: () => { setEditTarget(e); setEditDraft({ name: e.name, title: e.title, email: e.email, payrollNo: e.payrollNo, positionId: e.positionId, departmentId: e.departmentId, zoneId: e.zoneId, gender: e.gender ?? 'M', hireDate: e.hireDate, roleIds: [...new Set(e.roleIds ?? [])], password: '' }) } },
+    { icon: Pencil, label: 'Edit profile', onClick: () => { setEditTarget(e); setEditDraft({ name: e.name, title: e.title, email: e.email, payrollNo: e.payrollNo, positionId: e.positionId, departmentId: e.departmentId, divisionId: e.divisionId ?? '', unitId: e.unitId ?? '', zoneId: e.zoneId, gender: e.gender ?? 'M', hireDate: e.hireDate, roleIds: [...new Set(e.roleIds ?? [])], password: '' }) } },
     {
       icon: Power,
       label: e.active ? 'Deactivate' : 'Activate',
@@ -424,7 +424,7 @@ export function SettingsView() {
       toast.error('Mamlaka ya Mwisho haiondolewi hapa — inasimamiwa kwa uhamishaji wa mfumo pekee.')
       return
     }
-    const ok = await updateEmployee(editTarget.id, { name, email: editDraft.email, payrollNo: editDraft.payrollNo, positionId: editDraft.positionId, departmentId: editDraft.departmentId, zoneId: editDraft.zoneId, gender: editDraft.gender, hireDate: editDraft.hireDate, roleIds: editDraft.roleIds, ...(editDraft.password ? { password: editDraft.password } : {}) })
+    const ok = await updateEmployee(editTarget.id, { name, email: editDraft.email, payrollNo: editDraft.payrollNo, positionId: editDraft.positionId, departmentId: editDraft.departmentId, divisionId: editDraft.divisionId, unitId: editDraft.unitId, zoneId: editDraft.zoneId, gender: editDraft.gender, hireDate: editDraft.hireDate, roleIds: editDraft.roleIds, ...(editDraft.password ? { password: editDraft.password } : {}) })
     if (ok) setEditTarget(null)
   }
 
@@ -1823,11 +1823,25 @@ export function SettingsView() {
                 return { ...d, departmentId: deptId, positionId: posId }
               })
             }}>
+              <option value="">— none —</option>
               {allDepts.map((d) => (
                 <option key={d.id} value={d.id}>{d.name}</option>
               ))}
             </SelectInput>
+            <SelectInput label="Division" value={editDraft.divisionId} onChange={(e) => setEditDraft({ ...editDraft, divisionId: e.target.value })}>
+              <option value="">— none —</option>
+              {divisionsForDepartment(editDraft.departmentId).map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </SelectInput>
+            <SelectInput label="Independent unit" value={editDraft.unitId} onChange={(e) => setEditDraft({ ...editDraft, unitId: e.target.value })}>
+              <option value="">— none —</option>
+              {independentUnitOptions.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </SelectInput>
             <SelectInput label="Zone" value={editDraft.zoneId} onChange={(e) => setEditDraft({ ...editDraft, zoneId: e.target.value })}>
+              <option value="">— none —</option>
               {allZones.map((z) => (
                 <option key={z.id} value={z.id}>{z.name}</option>
               ))}
