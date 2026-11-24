@@ -3,6 +3,10 @@
 import * as React from 'react'
 import { Btn } from '@/components/leave/shared'
 import type { Approver, LeaveRequestData, LetterData } from '@/lib/leave'
+import { LetterView } from '@/components/leave/views/letter-view'
+import type { LeaveRequest } from '@/lib/leave'
+
+// ... (rest of imports and types)
 
 export interface HrProcessingModalProps {
   open: boolean
@@ -49,6 +53,7 @@ export function HrProcessingModal({ open, onClose, request, onDispatch, submitti
   const [letterBody, setLetterBody] = React.useState(() => buildLetterTemplate(request, request.requestedDays))
   const [error, setError] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState(false)
+  const [previewOpen, setPreviewOpen] = React.useState(false)
 
   // Re-seed every time a different request is opened. Doing this on open
   // (rather than on every render) keeps HR's edits if the parent re-renders.
@@ -81,6 +86,11 @@ export function HrProcessingModal({ open, onClose, request, onDispatch, submitti
     if (body.length < 20) {
       setError('Mwili wa barua ni mfupi mno. Andika angalau herufi 20.')
       return
+    }
+
+    if (approvedDays > request.requestedDays) {
+      setError(`Onyo: Umeweka siku ${approvedDays} ambazo ni zaidi ya siku ${request.requestedDays} zilizoombwa. Thibitisha kwa uangalifu.`)
+      // Don't block — just warn. HR can proceed.
     }
 
     setError(null)
@@ -268,11 +278,56 @@ export function HrProcessingModal({ open, onClose, request, onDispatch, submitti
             <Btn variant="ghost" onClick={onClose} disabled={disabled}>
               Ghairi
             </Btn>
+            <Btn variant="outline" onClick={() => setPreviewOpen(true)} disabled={disabled}>
+              Hakiki / Preview
+            </Btn>
             <Btn variant="emerald" onClick={handleDispatch} disabled={disabled}>
               {disabled ? 'Inatuma…' : 'Idhinisha na Tuma Barua'}
             </Btn>
           </div>
         </footer>
+
+        {/* Preview modal */}
+        {previewOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+            <div className="relative max-h-[90vh] w-full max-w-4xl overflow-auto rounded-2xl bg-card p-4 shadow-2xl">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-lg font-bold text-foreground">Hakiki barua / Preview letter</h3>
+                <button onClick={() => setPreviewOpen(false)} className="text-muted-foreground hover:text-foreground">✕</button>
+              </div>
+              <LetterView
+                request={{
+                  id: request.id,
+                  ref: referenceNumber || 'Kumb. Na.',
+                  employeeId: '',
+                  leaveTypeId: '',
+                  policyId: '',
+                  startDate: request.startDate,
+                  endDate: request.endDate,
+                  days: request.requestedDays,
+                  approvedDays,
+                  referenceNumber,
+                  letterBody,
+                  reason: '',
+                  status: 'approved',
+                  createdAt: new Date().toISOString(),
+                  documents: [],
+                  steps: [],
+                  isPaid: request.isPaidLeave,
+                }}
+                letter={{
+                  referenceNumber,
+                  approvedDays,
+                  letterBody,
+                }}
+                approvers={request.approvers}
+              />
+              <div className="mt-3 flex justify-end">
+                <Btn variant="ghost" onClick={() => setPreviewOpen(false)}>Funga / Close</Btn>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
