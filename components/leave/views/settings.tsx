@@ -424,7 +424,7 @@ export function SettingsView() {
       toast.error('Mamlaka ya Mwisho haiondolewi hapa — inasimamiwa kwa uhamishaji wa mfumo pekee.')
       return
     }
-    const ok = await updateEmployee(editTarget.id, { name, email: editDraft.email, payrollNo: editDraft.payrollNo, positionId: editDraft.positionId, departmentId: editDraft.departmentId, divisionId: editDraft.divisionId, unitId: editDraft.unitId, zoneId: editDraft.zoneId, gender: editDraft.gender, hireDate: editDraft.hireDate, roleIds: editDraft.roleIds, ...(editDraft.password ? { password: editDraft.password } : {}) })
+    const ok = await updateEmployee(editTarget.id, { name, email: editDraft.email, payrollNo: editDraft.payrollNo, positionId: editDraft.positionId, departmentId: editDraft.departmentId || null, divisionId: editDraft.divisionId || null, unitId: editDraft.unitId || null, zoneId: editDraft.zoneId || null, gender: editDraft.gender, hireDate: editDraft.hireDate, roleIds: editDraft.roleIds, ...(editDraft.password ? { password: editDraft.password } : {}) })
     if (ok) setEditTarget(null)
   }
 
@@ -569,10 +569,10 @@ export function SettingsView() {
       username: regDraft.username.trim(),
       password: regDraft.password,
       position_id: regDraft.position_id || null,
-      department_id: regDraft.department_id,
+      department_id: regDraft.department_id || null,
       division_id: regDraft.division_id || null,
       unit_id: regDraft.unit_id || null,
-      zone_id: regDraft.zone_id,
+      zone_id: regDraft.zone_id || null,
       gender: regDraft.gender,
       hire_date: regDraft.hire_date,
       role_ids: regDraft.role_ids.length ? regDraft.role_ids : undefined,
@@ -1756,6 +1756,8 @@ export function SettingsView() {
               <DetailCell label="Gender" value={viewTarget.gender ? (viewTarget.gender === 'M' ? 'Male' : 'Female') : '—'} />
               <DetailCell label="Position" value={viewTarget.title} />
               <DetailCell label="Department" value={getDept(viewTarget.departmentId).name} />
+              <DetailCell label="Division" value={viewTarget.divisionId ? getDept(viewTarget.divisionId).name : '—'} />
+              <DetailCell label="Independent unit" value={viewTarget.unitId ? getDept(viewTarget.unitId).name : '—'} />
               <DetailCell label="Email" value={viewTarget.email} />
               <DetailCell label="Status" value={viewTarget.active ? 'Active' : 'Inactive'} />
               <DetailCell label="Hired" value={viewTarget.hireDate ? viewTarget.hireDate.slice(0, 10) : '—'} />

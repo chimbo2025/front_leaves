@@ -111,10 +111,10 @@ export interface RegisterEmployeeInput {
   initials?: string
   payrollNo?: string | null
   position_id: string | null
-  department_id: string
+  department_id: string | null
   division_id?: string | null
   unit_id?: string | null
-  zone_id: string
+  zone_id: string | null
   gender?: 'M' | 'F'
   email?: string | null
   hire_date: string
@@ -291,7 +291,7 @@ interface LeaveContextValue {
   updateEmployee: (
     employeeId: string,
     patch: Partial<Pick<Employee, 'name' | 'title' | 'email' | 'gender' | 'hireDate'>> &
-      { payrollNo?: string; positionId?: string; departmentId?: string; divisionId?: string | null; unitId?: string | null; zoneId?: string; roleIds?: string[]; password?: string },
+      { payrollNo?: string; positionId?: string; departmentId?: string | null; divisionId?: string | null; unitId?: string | null; zoneId?: string | null; roleIds?: string[]; password?: string },
   ) => Promise<boolean>
   toggleEmployeeActive: (employeeId: string) => void
   /** Permanent staff removal — API refuses anyone with history (422 toast). */
@@ -1877,11 +1877,11 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const updateEmployee = React.useCallback(
-    (id: string, patch: Partial<Pick<Employee, 'name' | 'title' | 'email' | 'gender' | 'hireDate'>> & { payrollNo?: string; positionId?: string; departmentId?: string; divisionId?: string | null; unitId?: string | null; zoneId?: string; roleIds?: string[]; password?: string }): Promise<boolean> => {
+    (id: string, patch: Partial<Pick<Employee, 'name' | 'title' | 'email' | 'gender' | 'hireDate'>> & { payrollNo?: string; positionId?: string; departmentId?: string | null; divisionId?: string | null; unitId?: string | null; zoneId?: string | null; roleIds?: string[]; password?: string }): Promise<boolean> => {
       const target = employees.find((e) => e.id === id)
       if (!target) return Promise.resolve(false)
       return (async () => {
-        const body: { full_name?: string; email?: string; payroll_no?: string; position_id?: string; department_id?: string; division_id?: string | null; unit_id?: string | null; zone_id?: string; gender?: 'M' | 'F'; hire_date?: string; role_ids?: string[]; password?: string } = {}
+        const body: { full_name?: string; email?: string; payroll_no?: string; position_id?: string; department_id?: string | null; division_id?: string | null; unit_id?: string | null; zone_id?: string | null; gender?: 'M' | 'F'; hire_date?: string; role_ids?: string[]; password?: string } = {}
         if (patch.name !== undefined) body.full_name = patch.name
         if (patch.email !== undefined) body.email = patch.email
         if (patch.payrollNo !== undefined) body.payroll_no = patch.payrollNo
