@@ -35,6 +35,8 @@ import {
   tenureMonths,
   policyEffectiveAt,
   statusLabel,
+  getDept,
+  generateEmployeeRequestLetterBody,
   type ApprovalStep,
   type LeaveRequest,
   type LetterData,
@@ -79,6 +81,7 @@ interface PartState {
   startDate: string
   endDate: string
   reason: string
+  requestBody: string
   documentName: string
   documentFile?: File | null
   repeat: 'once' | 'weekly' | 'monthly'
@@ -147,6 +150,7 @@ export function RequestsView() {
     startDate: addDays(TODAY, 21),
     endDate: addDays(TODAY, 30),
     reason: '',
+    requestBody: '',
     documentName: '',
     documentFile: null,
     repeat: 'once',
@@ -332,6 +336,7 @@ export function RequestsView() {
       startDate: o.startDate,
       endDate: '',
       reason: occurrences.length > 1 ? `${form.reason} (occurrence ${i + 1} of ${occurrences.length}, ${form.repeat})` : form.reason,
+      requestBody: form.requestBody || undefined,
       documentName: form.documentName || undefined,
       documentFile: form.documentFile || undefined,
       isHalfDay: form.isHalfDay,
@@ -348,6 +353,7 @@ export function RequestsView() {
       startDate: addDays(TODAY, 21),
       endDate: addDays(TODAY, 30),
       reason: '',
+      requestBody: '',
       documentName: '',
       documentFile: null,
       repeat: 'once',
@@ -368,7 +374,7 @@ export function RequestsView() {
   const nextPending = (r: LeaveRequest) => r.steps.find((s) => s.status === 'pending')
 
   const openEdit = (r: LeaveRequest) => {
-    setEditForm({ employeeId: r.employeeId, leaveTypeId: r.leaveTypeId, startDate: r.startDate, endDate: r.endDate, reason: r.reason, documentName: '', repeat: 'once', repeatCount: 2, isHalfDay: r.isHalfDay ?? false, emergency: r.emergency ?? false, emergencyReason: r.emergencyReason ?? '' })
+    setEditForm({ employeeId: r.employeeId, leaveTypeId: r.leaveTypeId, startDate: r.startDate, endDate: r.endDate, reason: r.reason, requestBody: r.requestBody ?? '', documentName: '', repeat: 'once', repeatCount: 2, isHalfDay: r.isHalfDay ?? false, emergency: r.emergency ?? false, emergencyReason: r.emergencyReason ?? '' })
     setEditTarget(r)
   }
 
@@ -378,6 +384,7 @@ export function RequestsView() {
       startDate: editForm.startDate,
       endDate: '',
       reason: editForm.reason,
+      requestBody: editForm.requestBody || undefined,
       isHalfDay: editForm.isHalfDay,
     })
     setEditTarget(null)
@@ -691,7 +698,13 @@ export function RequestsView() {
           <SelectInput
             label="Leave type"
             value={form.leaveTypeId}
-            onChange={(e) => setForm({ ...form, leaveTypeId: e.target.value })}
+            onChange={(e) => {
+              const newLeaveTypeId = e.target.value
+              const leaveType = typeOf(newLeaveTypeId)
+              const deptName = getDept(employee.departmentId)?.name ?? '—'
+              const generated = generateEmployeeRequestLetterBody(deptName, leaveType?.name ?? newLeaveTypeId)
+              setForm({ ...form, leaveTypeId: newLeaveTypeId, requestBody: generated })
+            }}
           >
             {leaveOptions.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
@@ -743,6 +756,14 @@ export function RequestsView() {
             onChange={(e) => setForm({ ...form, reason: e.target.value })}
             rows={3}
             placeholder="Brief explanation of the leave request…"
+          />
+
+          <TextArea
+            label="Request letter (ombi la likizo)"
+            value={form.requestBody}
+            onChange={(e) => setForm({ ...form, requestBody: e.target.value })}
+            rows={3}
+            placeholder="Mimi ni mfanya kazi Afisi ya Mkurugenzi wa Mashtaka katika kitengo cha …"
           />
 
           <div className="rounded-xl border border-border bg-warm dark:bg-muted/30 p-3.5 space-y-3">
@@ -967,6 +988,12 @@ export function RequestsView() {
                 <p className="text-[11px] text-muted-foreground mt-0.5">
                   {approveTarget.request.reason || 'Hakuna sababu iliyotolewa. / No reason given.'}
                 </p>
+                  {approveTarget.request.requestBody && (
+                    <div className="mt-2 rounded-lg border border-border bg-background px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">Ombi la likizo / Request letter</p>
+                      <p className="text-[12px] text-foreground whitespace-pre-wrap">{approveTarget.request.requestBody}</p>
+                    </div>
+                  )}
               </div>
               {approveTarget.isFinalStep ? (
                 <>

@@ -67,6 +67,7 @@ interface NewRequestInput {
   startDate: string
   endDate: string
   reason: string
+  requestBody?: string
   documentName?: string
   documentFile?: File | null
   isHalfDay?: boolean
@@ -266,7 +267,7 @@ interface LeaveContextValue {
   eligibility: EligibilityDto[]
   orgEligibility: OrgEligibility | null
   submitRequest: (input: NewRequestInput) => LeaveRequest
-  updateRequest: (requestId: string, patch: Partial<Pick<LeaveRequest, 'startDate' | 'endDate' | 'reason' | 'isHalfDay'>>) => void
+  updateRequest: (requestId: string, patch: Partial<Pick<LeaveRequest, 'startDate' | 'endDate' | 'reason' | 'requestBody' | 'isHalfDay'>>) => void
   decide: (requestId: string, stepOrder: number, decision: 'approved' | 'rejected' | 'returned', comments?: string, endDate?: string, signaturePath?: string, signatureHash?: string, isPaid?: boolean | null, letter?: LetterData | null) => void
   resubmit: (requestId: string, documentName?: string) => void
   withdrawRequest: (requestId: string, reason?: string) => void
@@ -471,6 +472,7 @@ function requestFromRaw(d: RequestDto, slaByRole: Record<string, number>): Leave
     isPaid: d.is_paid ?? undefined,
     referenceNumber: d.reference_number ?? undefined,
     approvedDays: d.approved_days ?? undefined,
+    requestBody: d.request_body ?? undefined,
     letterBody: d.letter_body ?? undefined,
     letterIssuedAt: day(d.letter_issued_at) || undefined,
     documents: documentsFromDto(d.documents),
@@ -516,6 +518,7 @@ function requestFromResource(prev: LeaveRequest | null, r: RequestCompact, chain
     isPaid: r.is_paid ?? prev?.isPaid,
     referenceNumber: r.reference_number ?? prev?.referenceNumber,
     approvedDays: r.approved_days ?? prev?.approvedDays,
+    requestBody: r.request_body ?? prev?.requestBody,
     letterBody: r.letter_body ?? prev?.letterBody,
     letterIssuedAt: day(r.letter_issued_at) || prev?.letterIssuedAt,
     documents: r.documents ? documentsFromDto(r.documents) : prev?.documents ?? [],
@@ -1498,6 +1501,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
         emergency: input.emergency,
         emergencyReason: input.emergencyReason,
         reason: input.reason,
+        requestBody: input.requestBody,
         status: 'submitted',
         createdAt: TODAY,
         submittedAt: TODAY,
@@ -1525,6 +1529,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
             end_date: input.endDate || null,
             is_half_day: input.isHalfDay,
             reason: input.reason || null,
+            request_body: input.requestBody || null,
             is_emergency_exception: input.emergency,
             exception_reason: input.emergency ? input.emergencyReason ?? '' : null,
           }),
@@ -1559,7 +1564,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
   )
 
   const updateRequest = React.useCallback(
-    (requestId: string, patch: Partial<Pick<LeaveRequest, 'startDate' | 'endDate' | 'reason' | 'isHalfDay'>>) => {
+    (requestId: string, patch: Partial<Pick<LeaveRequest, 'startDate' | 'endDate' | 'reason' | 'requestBody' | 'isHalfDay'>>) => {
       const req = requests.find((r) => r.id === requestId)
       if (!req) return
       if (!EDITABLE_STATUSES.includes(req.status)) {
@@ -1574,6 +1579,7 @@ export function LeaveProvider({ children }: { children: React.ReactNode }) {
             end_date: patch.endDate ?? (req.endDate || null),
             is_half_day: patch.isHalfDay,
             reason: patch.reason ?? (req.reason || null),
+              request_body: patch.requestBody ?? (req.requestBody || null),
           })
           .then((res) => {
             const merged = requestFromResource(req, res.data)

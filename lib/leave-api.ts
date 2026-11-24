@@ -456,6 +456,7 @@ export interface RequestCompact {
   end_date: string | null
   days: number | null
   approved_days?: number | null
+  request_body?: string | null
   letter_body?: string | null
   letter_issued_at?: string | null
   is_paid?: boolean | null
@@ -486,6 +487,7 @@ export interface RequestDto {
   end_date: string | null
   days: number | null
   approved_days?: number | null
+  request_body?: string | null
   letter_body?: string | null
   letter_issued_at?: string | null
   is_paid?: boolean | null
@@ -611,6 +613,7 @@ export interface StoreLeaveRequestInput {
   end_date?: string | null
   is_half_day?: boolean
   reason?: string | null
+  request_body?: string | null
   is_emergency_exception?: boolean
   exception_reason?: string | null
 }
@@ -998,10 +1001,10 @@ export const leaveApi = {
       initials?: string
       payroll_no?: string | null
       position_id: string | null
-      department_id: string
+      department_id?: string | null
       division_id?: string | null
       unit_id?: string | null
-      zone_id: string
+      zone_id?: string | null
       gender?: 'M' | 'F'
       email?: string | null
       hire_date: string
@@ -1012,7 +1015,7 @@ export const leaveApi = {
       is_active?: boolean
     }) => request<{ data: EmployeeDto }>('/org/employees', { method: 'POST', body: JSON.stringify(body) }),
     tree: () => request<{ data: OrgBranch[] }>('/org/tree'),
-    updateEmployee: (id: string, body: Partial<Pick<EmployeeDto, 'full_name' | 'initials' | 'payroll_no' | 'position_id' | 'department_id' | 'zone_id' | 'gender' | 'email' | 'hire_date' | 'is_active'> & { role_ids?: string[] } & { password?: string }>) =>
+    updateEmployee: (id: string, body: Partial<Pick<EmployeeDto, 'full_name' | 'initials' | 'payroll_no' | 'position_id' | 'department_id' | 'division_id' | 'unit_id' | 'zone_id' | 'gender' | 'email' | 'hire_date' | 'is_active'> & { role_ids?: string[] } & { password?: string }>) =>
       request<{ data: EmployeeDto }>(`/org/employees/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     /** Force-delete a staff member; linked leave history is removed, evidence/payment records are preserved. */
     deleteEmployee: (id: string, reason: string) =>

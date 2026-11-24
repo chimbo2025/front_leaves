@@ -184,6 +184,8 @@ export interface LeaveRequest {
   days: number
   /** HR may grant fewer days than the requested period. */
   approvedDays?: number
+  /** Employee's request letter (application) — pre-defined text they can edit. */
+  requestBody?: string
   /** Body of the response letter written by HR at final processing. */
   letterBody?: string
   letterIssuedAt?: string
@@ -584,8 +586,13 @@ export function checkLeaveSubmissionWindow(
   return null
 }
 
-/** @deprecated Use {@link checkLeaveSubmissionWindow}. Kept for call sites. */
-export const checkSubmissionWindow = checkLeaveSubmissionWindow
+/**
+ * Pre-defined request letter body for the employee's application.
+ * Auto-generated from the employee's department and the selected leave type.
+ */
+export function generateEmployeeRequestLetterBody(department: string, leaveType: string): string {
+  return `Mimi ni mfanya kazi Afisi ya Mkurugenzi wa Mashtaka katika kitengo cha ${department}. Naomba kupatiwa likizo yangu ya ${leaveType} kwa mujibu wa sheria za utumishi.`
+}
 export function statusLabel(s: Status): string {
   const map: Record<Status, string> = {
     draft: 'Draft',

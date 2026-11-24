@@ -518,6 +518,12 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                   {typeOf(approveTarget.request.leaveTypeId)?.name ?? 'Leave'} · imependekezwa kuanzia {fmtShort(approveTarget.request.startDate)}
                 </p>
                 <p className="text-[11px] text-muted-foreground mt-0.5">{approveTarget.request.reason || 'Hakuna sababu iliyotolewa. / No reason given.'}</p>
+                {approveTarget.request.requestBody && (
+                  <div className="mt-2 rounded-lg border border-border bg-background px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">Ombi la likizo / Request letter</p>
+                    <p className="text-[12px] text-foreground whitespace-pre-wrap">{approveTarget.request.requestBody}</p>
+                  </div>
+                )}
               </div>
               {approveTarget.isFinalStep ? (
                 <>
