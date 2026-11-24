@@ -171,6 +171,9 @@ export function HrProcessingModal({ open, onClose, request, onDispatch, submitti
               <p className="mt-1 text-sky-900/90 dark:text-sky-200/90">
                 Mwombaji ameomba siku <strong>{request.requestedDays}</strong>. Unaweza kuidhinisha idadi ndogo kulingana na salio la likizo na sera. Idadi unayoweka hapa itaonekana kwenye barua rasmi na kwenye rekodi ya ombi.
               </p>
+              <p className="mt-2 text-[11px] font-semibold text-sky-800 dark:text-sky-300">
+                Kama MHR, unaweza kuidhinisha siku zaidi ya salio lililobaki (override). / As HR, you may grant more days than the remaining balance.
+              </p>
             </section>
 
             <div>
