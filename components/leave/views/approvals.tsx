@@ -260,7 +260,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
         <StatCard icon={ListChecks} label="Awaiting my decision" value={myQueue.length} hint="Assigned to you" tone="amber" />
         <StatCard icon={Timer} label="SLA overdue" value={overdue} hint="Escalating to next authority" tone="rose" />
         <StatCard icon={ShieldCheck} label="Steps acted so far" value={decided} hint="Across current requests" tone="teal" />
-        <StatCard icon={Check} label="Deciding as" value={employee.name.split(' ')[0]} hint={supervisorMode ? `${employee.title} · supervisor mode` : employee.title} tone="emerald" />
+        <StatCard icon={Check} label="Deciding as" value={employee?.name?.split(' ')[0] ?? '—'} hint={supervisorMode ? `${employee.title} · supervisor mode` : employee.title} tone="emerald" />
       </div>
 
       <Tabs

@@ -751,7 +751,7 @@ export function SettingsView() {
                           </div>
                         </td>
                         <td className="py-3 px-3 text-foreground hidden sm:table-cell text-[12.5px] font-medium">{e.title}</td>
-                        <td className="py-3 px-3 text-muted-foreground hidden md:table-cell">{getDept(e.departmentId).name}</td>
+                        <td className="py-3 px-3 text-muted-foreground hidden md:table-cell">{getDept(e.departmentId)?.name ?? '—'}</td>
                         <td className="py-3 px-3 hidden xl:table-cell">
                           <span className="inline-flex items-center gap-1.5 text-muted-foreground text-[12px]">
                             <MapPin className="w-3 h-3 text-teal-700" /> {getZone(e.zoneId).short}
@@ -1748,20 +1748,20 @@ export function SettingsView() {
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-foreground">{viewTarget.name}</p>
                 <p className="text-[12px] text-muted-foreground">{viewTarget.title}</p>
-                <p className="text-[11px] text-muted-foreground">{getZone(viewTarget.zoneId).name} · {getDept(viewTarget.departmentId).name}</p>
+                <p className="text-[11px] text-muted-foreground">{getZone(viewTarget.zoneId)?.name ?? '—'} · {getDept(viewTarget.departmentId)?.name ?? '—'}</p>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <DetailCell label="Payroll no." value={viewTarget.payrollNo} />
               <DetailCell label="Gender" value={viewTarget.gender ? (viewTarget.gender === 'M' ? 'Male' : 'Female') : '—'} />
               <DetailCell label="Position" value={viewTarget.title} />
-              <DetailCell label="Department" value={getDept(viewTarget.departmentId).name} />
+              <DetailCell label="Department" value={getDept(viewTarget.departmentId)?.name ?? '—'} />
               <DetailCell label="Division" value={viewTarget.divisionId ? getDept(viewTarget.divisionId).name : '—'} />
               <DetailCell label="Independent unit" value={viewTarget.unitId ? getDept(viewTarget.unitId).name : '—'} />
               <DetailCell label="Email" value={viewTarget.email} />
               <DetailCell label="Status" value={viewTarget.active ? 'Active' : 'Inactive'} />
               <DetailCell label="Hired" value={viewTarget.hireDate ? viewTarget.hireDate.slice(0, 10) : '—'} />
-              <DetailCell label="Zone" value={getZone(viewTarget.zoneId).name} />
+              <DetailCell label="Zone" value={getZone(viewTarget.zoneId)?.name ?? '—'} />
             </div>
             {/* customRoleAssignments is derived from roleIds (the non-system subset),
                 so merging the two without de-duplicating renders every custom role

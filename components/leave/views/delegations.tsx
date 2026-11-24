@@ -84,8 +84,8 @@ export function DelegationsView() {
       const q = search.trim().toLowerCase()
       if (!q) return true
       return (
-        getEmployee(d.delegatorId).name.toLowerCase().includes(q) ||
-        getEmployee(d.delegateId).name.toLowerCase().includes(q) ||
+        getEmployee(d.delegatorId)?.name?.toLowerCase().includes(q) ||
+        getEmployee(d.delegateId)?.name?.toLowerCase().includes(q) ||
         (roleLabels[d.scope as ApproverRole] ?? d.scope).toLowerCase().includes(q)
       )
     })
@@ -293,15 +293,15 @@ export function DelegationsView() {
         open={detail !== null}
         onClose={() => setDetail(null)}
         title="Delegation details"
-        subtitle={detail ? `${getEmployee(detail.delegatorId).name} → ${getEmployee(detail.delegateId).name}` : ''}
+        subtitle={detail ? `${getEmployee(detail.delegatorId)?.name ?? detail.delegatorId} → ${getEmployee(detail.delegateId)?.name ?? detail.delegateId}` : ''}
         size="md"
       >
         {detail && (
           <div className="grid grid-cols-2 gap-3">
-            <DetailCell label="Delegator" value={getEmployee(detail.delegatorId).name} />
-            <DetailCell label="Delegate" value={getEmployee(detail.delegateId).name} />
+            <DetailCell label="Delegator" value={getEmployee(detail.delegatorId)?.name ?? detail.delegatorId} />
+            <DetailCell label="Delegate" value={getEmployee(detail.delegateId)?.name ?? detail.delegateId} />
             <DetailCell label="Scope" value={roleLabels[detail.scope as ApproverRole] ?? detail.scope} />
-            <DetailCell label="Authorized by" value={getEmployee(detail.authorizedBy).name} />
+            <DetailCell label="Authorized by" value={getEmployee(detail.authorizedBy)?.name ?? detail.authorizedBy} />
             <DetailCell label="From" value={fmtShort(detail.startDate)} />
             <DetailCell label="To" value={fmtShort(detail.endDate)} />
             <DetailCell label="Status" value={detail.active ? 'Active' : 'Revoked'} />

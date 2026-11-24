@@ -228,7 +228,7 @@ export function CalendarView() {
             <div className="rounded-2xl bg-gradient-to-br from-teal-700 to-emerald-700 text-white p-5 shadow-lg shadow-teal-700/20">
               <p className="text-[11px] uppercase tracking-[0.14em] text-teal-100 font-semibold mb-1">Closest upcoming leave</p>
               <p className="font-serif text-[18px] font-semibold leading-snug">
-                {getEmployee(closestUpcoming.employeeId).name.split(' ')[0]} — {typeOf(closestUpcoming.leaveTypeId)?.short}
+                {getEmployee(closestUpcoming.employeeId)?.name?.split(' ')[0] ?? '—'} - {typeOf(closestUpcoming.leaveTypeId)?.short}
               </p>
               <p className="text-[12px] text-teal-100 mt-1.5 leading-relaxed">
                 {fmtShort(closestUpcoming.startDate)} → {fmtShort(closestUpcoming.endDate)} · {closestUpcoming.days} days
@@ -418,7 +418,7 @@ function ActivityColumn({
             <li key={r.id} className="flex items-center gap-2.5 rounded-lg border border-border bg-card px-2.5 py-2">
               <span className={cn('h-2 w-2 rounded-full flex-shrink-0', typeOf(r.leaveTypeId)?.color ?? 'bg-zinc-400')} />
               <div className="min-w-0 flex-1">
-                <p className="text-[12px] font-semibold text-foreground truncate">{getEmployee(r.employeeId)?.name.split(' ')[0] ?? r.employeeId} - {typeOf(r.leaveTypeId)?.short}</p>
+                <p className="text-[12px] font-semibold text-foreground truncate">{getEmployee(r.employeeId)?.name?.split(' ')[0] ?? r.employeeId} - {typeOf(r.leaveTypeId)?.short}</p>
                 <p className="text-[10px] text-muted-foreground truncate">
                   {fmtShort(r.startDate)} → {fmtShort(r.endDate)}
                   {r.status === 'approved' && r.decidedAt && <span className="text-emerald-600"> · decided {fmtShort(r.decidedAt)}</span>}
