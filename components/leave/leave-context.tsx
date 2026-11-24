@@ -726,6 +726,9 @@ const NOTIFICATION_KINDS: Record<string, NotificationItem['kind']> = {
   handover_rejected: 'handover',
   delegation: 'delegation',
   policy: 'policy',
+  // Letter dispatch and payment hand-off notifications.
+  letter_dispatched: 'approved',
+  payment_handoff: 'policy',
   // Raw aliases emitted by the seeded/demo notification rows so they do not
   // fall through to the 'policy' default.
   submitted: 'submitted',
