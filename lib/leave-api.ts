@@ -445,6 +445,21 @@ export interface RequestAssignment {
   decision_comment?: string | null
 }
 
+/** Requester org snapshot attached to every request resource so the letters
+ *  can render the employee, position and organisation reliably. */
+export interface EmployeeOrgDto {
+  name: string | null
+  title: string | null
+  department: string | null
+  division: string | null
+  unit: string | null
+  zone: string | null
+  department_id: string | null
+  division_id: string | null
+  unit_id: string | null
+  zone_id: string | null
+}
+
 export interface RequestCompact {
   id: number
   ref: string
@@ -469,6 +484,7 @@ export interface RequestCompact {
   is_emergency_exception: boolean
   exception_reason: string | null
   employee: { id: string; full_name: string } | null
+  employee_org?: EmployeeOrgDto | null
   leave_type: { code: string; name: string } | null
   assignments: RequestAssignment[]
   documents?: DocumentDto[]
@@ -502,6 +518,7 @@ export interface RequestDto {
   created_at: string
   updated_at: string
   employee?: EmployeeDto | null
+  employee_org?: EmployeeOrgDto | null
   leave_type?: LeaveTypeDto | null
   policy?: PolicyDto | null
   current_owner?: EmployeeDto | null

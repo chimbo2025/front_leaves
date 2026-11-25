@@ -35,6 +35,12 @@ export function RequestDetail({ request, isHr = false, actions }: { request: Lea
   const policy = policyEffectiveAt(request.leaveTypeId, request.submittedAt ?? request.createdAt)
   const zone = emp ? getZone(emp.zoneId) : undefined
   const dept = emp ? getDept(emp.departmentId) : undefined
+  const org = request.employeeOrg
+  const employeeName = emp?.name ?? org?.name ?? request.employeeId
+  const employeeTitle = (emp?.title ?? org?.title ?? '—') === 'No position assigned' ? '—' : (emp?.title ?? org?.title ?? '—')
+  const employeeOrgLabel =
+    dept?.name ?? org?.department ?? org?.division ?? org?.unit ?? '—'
+  const employeeZoneLabel = zone?.name ?? org?.zone ?? '—'
   const visibleDocs = isHr ? request.documents : request.documents.filter((d) => !d.restricted)
 
   // Which document the preview modal is showing. The employee application
@@ -104,9 +110,9 @@ export function RequestDetail({ request, isHr = false, actions }: { request: Lea
           <div className="flex items-center gap-3">
             <Avatar id={emp?.id ?? request.employeeId} size="lg" />
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-foreground leading-tight truncate">{emp?.name ?? request.employeeId}</p>
-              <p className="text-[12px] text-muted-foreground truncate">{emp?.title ?? '—'}</p>
-              <p className="text-[11px] text-muted-foreground truncate">{zone?.name ?? '—'} · {dept?.name ?? '—'}</p>
+              <p className="text-sm font-semibold text-foreground leading-tight truncate">{employeeName}</p>
+              <p className="text-[12px] text-muted-foreground truncate">{employeeTitle}</p>
+              <p className="text-[11px] text-muted-foreground truncate">{employeeZoneLabel} · {employeeOrgLabel}</p>
             </div>
           </div>
         </div>

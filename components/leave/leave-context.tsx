@@ -19,6 +19,7 @@ import {
   type Department,
   type Status,
   type Employee,
+  type EmployeeOrgSnapshot,
   type LeaveRequest,
   type LetterData,
   type LeaveType,
@@ -41,6 +42,7 @@ import {
   type EmployeeDto,
   type RequestDto,
   type RequestCompact,
+  type EmployeeOrgDto,
   type WorkflowAssignmentRaw,
   type RequestAssignment,
   type ChainItem,
@@ -450,11 +452,28 @@ function stepsFromCompact(a: RequestAssignment[], chain: ChainItem[] | undefined
   })
 }
 
+function employeeOrgFromDto(o?: EmployeeOrgDto | null): EmployeeOrgSnapshot | undefined {
+  if (!o) return undefined
+  return {
+    name: o.name ?? undefined,
+    title: o.title ?? undefined,
+    department: o.department ?? undefined,
+    division: o.division ?? undefined,
+    unit: o.unit ?? undefined,
+    zone: o.zone ?? undefined,
+    departmentId: o.department_id ?? undefined,
+    divisionId: o.division_id ?? undefined,
+    unitId: o.unit_id ?? undefined,
+    zoneId: o.zone_id ?? undefined,
+  }
+}
+
 function requestFromRaw(d: RequestDto, slaByRole: Record<string, number>): LeaveRequest {
   return {
     id: String(d.id),
     ref: d.ref,
     employeeId: d.employee_id ?? '',
+    employeeOrg: employeeOrgFromDto(d.employee_org),
     leaveTypeId: d.leave_type_id,
     policyId: d.policy_id ?? '',
     startDate: day(d.start_date),
@@ -501,6 +520,7 @@ function requestFromResource(prev: LeaveRequest | null, r: RequestCompact, chain
     id: String(r.id),
     ref: r.ref,
     employeeId: r.employee_id ?? prev?.employeeId ?? '',
+    employeeOrg: employeeOrgFromDto(r.employee_org) ?? prev?.employeeOrg,
     leaveTypeId: r.leave_type_id,
     policyId: r.policy_id ?? prev?.policyId ?? '',
     startDate: day(r.start_date) || prev?.startDate || TODAY,

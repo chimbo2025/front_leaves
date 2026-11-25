@@ -171,12 +171,29 @@ export interface Document {
   uploadedAt: string
 }
 
+/** Requester's org snapshot carried by the request resource, so the letters
+ *  render the right person/department even for scoped viewers. */
+export interface EmployeeOrgSnapshot {
+  name?: string
+  title?: string
+  department?: string
+  division?: string
+  unit?: string
+  zone?: string
+  departmentId?: string
+  divisionId?: string
+  unitId?: string
+  zoneId?: string
+}
+
 export interface LeaveRequest {
   id: string
   ref: string
   /** Official reference printed on the response letter ("Kumb. Na"). */
   referenceNumber?: string
   employeeId: string
+  /** Server-side org snapshot for this employee (letters). */
+  employeeOrg?: EmployeeOrgSnapshot
   leaveTypeId: string
   policyId: string
   startDate: string

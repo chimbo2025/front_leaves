@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { useLeave } from '@/components/leave/leave-context'
 import {
   addDays,
@@ -11,7 +12,7 @@ import {
   type ApprovalStep,
   type LeaveRequest,
 } from '@/lib/leave'
-import type { ChainItem, SignatureSeal } from '@/lib/leave-api'
+import { leaveApi, type ChainItem, type SignatureSeal } from '@/lib/leave-api'
 
 const ACCENT = '#0F5C54'
 const MUTED = '#4A5A66'
@@ -66,9 +67,30 @@ export interface RequestLetterViewProps {
 export function RequestLetterView({ request, signatures = [], chain = [] }: RequestLetterViewProps) {
   const { employees, allZones, allDepts } = useLeave()
   const employee = employees.find((row) => row.id === request.employeeId) ?? getEmployee(request.employeeId)
+  const org = request.employeeOrg
   const leaveType = getLeaveTypeSafe(request.leaveTypeId)
-  const department = allDepts.find((row) => row.id === employee?.departmentId)?.name ?? (employee ? getDept(employee.departmentId)?.name : undefined) ?? '—'
-  const zone = allZones.find((row) => row.id === employee?.zoneId)?.name ?? (employee ? getZone(employee.zoneId)?.name : undefined) ?? '—'
+
+  // The employee can be outside the viewer's scoped employee list (an approver
+  // in another department, for example). The server-side org snapshot on the
+  // request is the authoritative fallback so the letter never prints "—".
+  const employeeName = employee?.name ?? org?.name ?? '—'
+  const rawTitle = employee?.title ?? org?.title ?? ''
+  const employeeTitle = rawTitle === 'No position assigned' ? '' : rawTitle
+
+  const deptRow = allDepts.find((row) => row.id === (employee?.departmentId || org?.departmentId))
+  const divisionRow = allDepts.find((row) => row.id === (employee?.divisionId || org?.divisionId))
+  const unitRow = allDepts.find((row) => row.id === (employee?.unitId || org?.unitId))
+  const zoneRow = allZones.find((row) => row.id === (employee?.zoneId || org?.zoneId))
+
+  const departmentName = deptRow?.name ?? org?.department ?? (employee ? getDept(employee.departmentId)?.name : undefined) ?? ''
+  const divisionName = divisionRow?.name ?? org?.division ?? ''
+  const unitName = unitRow?.name ?? org?.unit ?? ''
+  const zone = zoneRow?.name ?? org?.zone ?? (employee ? getZone(employee.zoneId)?.name : undefined) ?? '—'
+
+  // Departments, divisions and units are all Department rows. Show whichever
+  // the employee actually belongs to: department → division → unit.
+  const organisation = departmentName || divisionName || unitName || 'Afisi Kuu'
+
   const approved = request.status === 'approved'
   const rejected = request.status === 'rejected'
   const outcome = approved ? 'IMEIDHINISHWA' : rejected ? 'IMEKATALIWA' : 'INASUBIRI'
@@ -76,11 +98,38 @@ export function RequestLetterView({ request, signatures = [], chain = [] }: Requ
   const leaveName = leaveType?.swahili || leaveType?.name || request.leaveTypeId
   const period = request.endDate ? `${formatSwDate(request.startDate)} hadi ${formatSwDate(request.endDate)}` : `${formatSwDate(request.startDate)} hadi tarehe ya mwisho itakayowekwa`
 
-  // Fixed Swahili application paragraph. Older rows may not carry a stored
-  // body, so rebuild it from the employee's department and leave type.
-  const applicationText =
-    request.requestBody?.trim() ||
-    generateEmployeeRequestLetterBody(department === '—' ? 'Afisi Kuu' : department, leaveName)
+  // Fixed Swahili application paragraph, built from the employee's live
+  // organisation (department/division/unit) and the selected leave type.
+  const applicationText = generateEmployeeRequestLetterBody(organisation, leaveName)
+
+  // The approval chain and signature seals are fetched from the backend (the
+  // HR-configured workflow) whenever the caller did not supply them — e.g. the
+  // approver's preview modal. That keeps "Uidhinishaji" in sync with HR.
+  const [resolvedChain, setResolvedChain] = useState<ChainItem[]>([])
+  const [resolvedSeals, setResolvedSeals] = useState<SignatureSeal[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (chain.length === 0 && request.steps.length === 0) {
+      leaveApi.requests
+        .workflow(request.id)
+        .then((res) => { if (!cancelled) setResolvedChain(res.data) })
+        .catch(() => undefined)
+    }
+    if (signatures.length === 0) {
+      leaveApi.requests
+        .signaturesFor(request.id)
+        .then((res) => { if (!cancelled) setResolvedSeals(res.data) })
+        .catch(() => undefined)
+    }
+
+    return () => { cancelled = true }
+  }, [request.id, request.steps.length, chain.length, signatures.length])
+
+  // Caller-supplied data wins; otherwise use what we fetched from the backend.
+  const effectiveChain = chain.length > 0 ? chain : resolvedChain
+  const effectiveSeals = signatures.length > 0 ? signatures : resolvedSeals
 
   const facts: [string, string][] = [
     ['Aina ya likizo', leaveName],
@@ -100,7 +149,7 @@ export function RequestLetterView({ request, signatures = [], chain = [] }: Requ
   const distinctApprovers: Array<ApprovalStep & { roleLabels: string[] }> = []
   {
     const byKey = new Map<string, number>()
-    for (const s of letterSteps(request, chain)) {
+    for (const s of letterSteps(request, effectiveChain)) {
       const key = (s.assigneeId || s.assigneeName || '').trim()
       if (!key) continue
       const idx = byKey.get(key)
@@ -120,7 +169,7 @@ export function RequestLetterView({ request, signatures = [], chain = [] }: Requ
   }
 
   const sealsByActor = new Map<string, SignatureSeal>()
-  for (const seal of signatures) {
+  for (const seal of effectiveSeals) {
     const prev = sealsByActor.get(seal.actor_id)
     if (!prev || String(seal.signed_at ?? '') > String(prev.signed_at ?? '')) sealsByActor.set(seal.actor_id, seal)
   }
@@ -138,9 +187,7 @@ export function RequestLetterView({ request, signatures = [], chain = [] }: Requ
       <style>{`@page{size:A4;margin:0}.letter-sans{font-family:'IBM Plex Sans',system-ui,sans-serif}.letter-label{font-size:10px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;color:${MUTED}}`}</style>
       <link href={FONT_LINK} rel="stylesheet" />
       <header className="letter-sans" style={{ textAlign: 'center', borderBottom: `3px double ${ACCENT}`, paddingBottom: 14 }}>
-        <div style={{ fontSize: 12, letterSpacing: '.12em', textTransform: 'uppercase', color: MUTED }}>Jamhuri ya Mapinduzi ya Zanzibar</div>
-        <h1 style={{ margin: '6px 0 2px', color: ACCENT, fontSize: 21, textTransform: 'uppercase' }}>Ofisi ya Mkurugenzi wa Mashtaka</h1>
-        <div style={{ color: MUTED, fontSize: 12 }}>Zanzibar</div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: ACCENT, textTransform: 'uppercase' }}>DOKEZO</div>
       </header>
 
       {/* Status stamp on the left; requester block TOP-RIGHT. */}
@@ -149,9 +196,9 @@ export function RequestLetterView({ request, signatures = [], chain = [] }: Requ
           <div style={{ border: `2px solid ${outcomeColor}`, color: outcomeColor, borderRadius: 8, padding: '5px 12px', fontWeight: 700, display: 'inline-block', marginTop: 12, fontSize: 13 }}>{outcome}</div>
         </div>
         <div style={{ textAlign: 'right', lineHeight: 1.55 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: ACCENT }}>{employee?.name ?? '—'}</div>
-          <div style={{ fontSize: 12 }}>{employee?.title ?? '—'}</div>
-          <div style={{ fontSize: 11, color: MUTED }}>{department} · {zone}</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: ACCENT }}>{employeeName}</div>
+          {employeeTitle && <div style={{ fontSize: 12 }}>{employeeTitle}</div>}
+          <div style={{ fontSize: 11, color: MUTED }}>{organisation} · {zone}</div>
           <div style={{ fontSize: 11, color: MUTED, marginTop: 6 }}>
             <span className="letter-label">Tarehe</span> {formatSwDate(request.decidedAt ?? request.submittedAt ?? request.createdAt)}
           </div>
