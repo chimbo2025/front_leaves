@@ -604,32 +604,35 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                   />
                 </div>
 
-                <Btn
-                  variant="outline"
-                  type="button"
-                  onClick={() => setShowPreviewLetter(true)}
-                  disabled={!approveReferenceNumber.trim() || !approveLetterBody.trim()}
-                >
-                  Hakiki Barua / Preview Letter
-                </Btn>
+                {/* Preview button moved to footer */}
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between gap-2">
               <Btn
-                variant="emerald"
-                disabled={approveTarget?.isFinalStep === true && !approveReturnDate}
-                onClick={() => {
-                  if (approveTarget && approveTarget.isFinalStep && nextStep(approveTarget.request)?.role === 'HR') {
-                    setHrOpen(true)
-                  } else {
-                    setSignatureOpen(true)
-                  }
-                }}
+                variant="outline"
+                type="button"
+                onClick={() => setShowPreviewLetter(true)}
+                disabled={!approveReferenceNumber.trim() || !approveLetterBody.trim()}
               >
-                <Check className="w-3.5 h-3.5" /> Grant leave
+                Hakiki Barua / Preview Letter
               </Btn>
-              <Btn variant="outline" onClick={() => { setApproveTarget(null); setSignatureOpen(false); setHrOpen(false); setPendingLetter(null) }}>Cancel</Btn>
+              <div className="flex items-center gap-2">
+                <Btn variant="outline" onClick={() => { setApproveTarget(null); setSignatureOpen(false); setHrOpen(false); setPendingLetter(null) }}>Cancel</Btn>
+                <Btn
+                  variant="emerald"
+                  disabled={approveTarget?.isFinalStep === true && !approveReturnDate}
+                  onClick={() => {
+                    if (approveTarget && approveTarget.isFinalStep && nextStep(approveTarget.request)?.role === 'HR') {
+                      setHrOpen(true)
+                    } else {
+                      setSignatureOpen(true)
+                    }
+                  }}
+                >
+                  <Check className="w-3.5 h-3.5" /> Grant leave
+                </Btn>
+              </div>
             </div>
 
             {/* Last step: the signature ceremony. Completing it records the

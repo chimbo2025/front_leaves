@@ -1070,32 +1070,34 @@ export function RequestsView() {
                   />
                 </div>
 
-                <Btn
-                  variant="outline"
-                  type="button"
-                  onClick={() => setShowPreviewLetter(true)}
-                  disabled={!approveReferenceNumber.trim() || !approveLetterBody.trim()}
-                >
-                  Hakiki Barua / Preview Letter
-                </Btn>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between gap-2">
               <Btn
-                variant="emerald"
-                disabled={approveTarget?.isFinalStep === true && !approveReturnDate}
-                onClick={() => {
-                  if (approveTarget && approveTarget.isFinalStep && nextPending(approveTarget.request)?.role === 'HR') {
-                    setHrOpen(true)
-                  } else {
-                    setSignatureOpen(true)
-                  }
-                }}
+                variant="outline"
+                type="button"
+                onClick={() => setShowPreviewLetter(true)}
+                disabled={!approveReferenceNumber.trim() || !approveLetterBody.trim()}
               >
-                <Check className="w-3.5 h-3.5" /> Grant leave
+                Hakiki Barua / Preview Letter
               </Btn>
-              <Btn variant="outline" onClick={() => { setApproveTarget(null); resetSignature() }}>Cancel</Btn>
+              <div className="flex items-center gap-2">
+                <Btn variant="outline" onClick={() => { setApproveTarget(null); resetSignature() }}>Cancel</Btn>
+                <Btn
+                  variant="emerald"
+                  disabled={approveTarget?.isFinalStep === true && !approveReturnDate}
+                  onClick={() => {
+                    if (approveTarget && approveTarget.isFinalStep && nextPending(approveTarget.request)?.role === 'HR') {
+                      setHrOpen(true)
+                    } else {
+                      setSignatureOpen(true)
+                    }
+                  }}
+                >
+                  <Check className="w-3.5 h-3.5" /> Grant leave
+                </Btn>
+              </div>
             </div>
 
             {/* Last step: sign, then the decision is recorded. Closing this
