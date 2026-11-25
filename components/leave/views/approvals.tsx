@@ -540,7 +540,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                   </Btn>
                 </div>
               </div>
-              {lastStepRole ? (
+              {approveTarget.isFinalStep ? (
                 <>
                   <TextInput
                     type="date"
@@ -582,9 +582,9 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
             <div className="flex items-center gap-2">
               <Btn
                 variant="emerald"
-                disabled={Boolean(lastStepRole) && !approveReturnDate}
+                disabled={approveTarget?.isFinalStep === true && !approveReturnDate}
                 onClick={() => {
-                  if (lastStepRole === 'HR') {
+                  if (approveTarget && approveTarget.isFinalStep && nextStep(approveTarget.request)?.role === 'HR') {
                     setHrOpen(true)
                   } else {
                     setSignatureOpen(true)
@@ -609,7 +609,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                 doDecide(
                   target.request,
                   'approved',
-                  Boolean(lastStepRole) ? approveReturnDate : undefined,
+                  target.isFinalStep ? approveReturnDate : undefined,
                   approveComment.trim() || undefined,
                   { path, hash },
                   approveIsPaid,

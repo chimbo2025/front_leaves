@@ -1012,7 +1012,7 @@ export function RequestsView() {
                     </Btn>
                   </div>
               </div>
-              {lastStepRole ? (
+              {approveTarget.isFinalStep ? (
                 <>
                   <TextInput
                     type="date"
@@ -1047,9 +1047,9 @@ export function RequestsView() {
             <div className="flex items-center gap-2">
               <Btn
                 variant="emerald"
-                disabled={Boolean(lastStepRole) && !approveReturnDate}
+                disabled={approveTarget?.isFinalStep === true && !approveReturnDate}
                 onClick={() => {
-                  if (lastStepRole && lastStepRole === 'HR') {
+                  if (approveTarget && approveTarget.isFinalStep && nextPending(approveTarget.request)?.role === 'HR') {
                     setHrOpen(true)
                   } else {
                     setSignatureOpen(true)
@@ -1071,7 +1071,7 @@ export function RequestsView() {
                 const target = approveTarget
                 setSignatureOpen(false)
                 if (!target) return
-                decide(target.request.id, target.stepOrder, 'approved', approveComment.trim() || undefined, Boolean(lastStepRole) ? approveReturnDate : undefined, path, hash, approveIsPaid, pendingLetter)
+                decide(target.request.id, target.stepOrder, 'approved', approveComment.trim() || undefined, target.isFinalStep ? approveReturnDate : undefined, path, hash, approveIsPaid, pendingLetter)
                 resetSignature()
                 setApproveTarget(null)
               }}
