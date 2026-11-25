@@ -234,7 +234,10 @@ export function RequestLetterView({ request, signatures = [], chain = [] }: Requ
           <p style={{ fontSize: 12, color: MUTED, margin: '10px 0 0' }}>Hakuna hatua za kuidhinisha zilizorekodiwa.</p>
         ) : (
           <ol style={{ listStyle: 'none', margin: '6px 0 0', padding: 0 }}>
-            {distinctApprovers.slice(-1).map((s, i) => {
+            {(distinctApprovers.filter((s) => s.roleLabels.some((r) => r === 'HR' || r === 'Human Resources')).slice(-1).length > 0
+              ? distinctApprovers.filter((s) => s.roleLabels.some((r) => r === 'HR' || r === 'Human Resources')).slice(-1)
+              : distinctApprovers.slice(-1)
+            ).map((s, i) => {
               const state = approverState(s)
               const seal = sealsByActor.get(s.assigneeId ?? '')
               return (

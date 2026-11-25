@@ -164,7 +164,7 @@ export function LetterView({ request, chain = [], letter = null, approvers }: Le
       {/* ── Letterhead ────────────────────────────────────────────────── */}
       <header style={{ textAlign: 'center' }}>
         <img
-          src="/coat-of-arms-zanzibar.png"
+          src="/smz.png"
           alt="Nembo ya Serikali ya Mapinduzi ya Zanzibar"
           style={{ height: 68, width: 'auto', objectFit: 'contain', margin: '0 auto 6px', display: 'block' }}
         />
@@ -259,7 +259,7 @@ export function LetterView({ request, chain = [], letter = null, approvers }: Le
       <div style={{ marginTop: 28, textAlign: 'center', fontSize: 13, lineHeight: 1.55 }}>
         <div>Ahsante</div>
         <div style={{ marginTop: 26, letterSpacing: '.06em' }}>..................................</div>
-        <div style={{ fontWeight: 700, marginTop: 6 }}>MWANDAWA I. OTHMAN,</div>
+        <div style={{ fontWeight: 700, marginTop: 6 }}>{copyApprovers.length > 0 ? copyApprovers[copyApprovers.length - 1].name.toUpperCase() + ',' : 'MWANDAWA I. OTHMAN,'}</div>
         <div>/MKURUGENZI WA MASHTAKA,</div>
         <div>AFISI YA MKURUGENZI WA MASHTAKA,</div>
         <div>ZANZIBAR.</div>
