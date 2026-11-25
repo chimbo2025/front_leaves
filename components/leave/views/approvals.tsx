@@ -540,7 +540,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                   </Btn>
                 </div>
               </div>
-              {approveTarget.isFinalStep ? (
+              {approveTarget.isFinalStep && (
                 <>
                   <TextInput
                     type="date"
@@ -557,10 +557,6 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                     Likizo hii italipwa / This leave is paid
                   </label>
                 </>
-              ) : (
-                <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12px] text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200">
-                  Hatua ya kati ya kuidhinisha. Tarehe ya kurudi na siku zilizopewa zinahifadhiwa kwa mwidhinishaji wa mwisho.
-                </p>
               )}
               <ApprovalInsightBoxes
                 insight={approvalInsight}
