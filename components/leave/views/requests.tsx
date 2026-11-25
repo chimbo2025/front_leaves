@@ -688,7 +688,7 @@ export function RequestsView() {
         }
         size="lg"
         footer={
-          <Btn onClick={submit} disabled={!form.reason.trim()}>
+          <Btn onClick={submit} disabled={false}>
             <Send className="w-3.5 h-3.5" /> Submit request
           </Btn>
         }
@@ -756,14 +756,6 @@ export function RequestsView() {
             onChange={(e) => setForm({ ...form, reason: e.target.value })}
             rows={3}
             placeholder="Brief explanation of the leave request…"
-          />
-
-          <TextArea
-            label="Request letter (ombi la likizo)"
-            value={form.requestBody}
-            onChange={(e) => setForm({ ...form, requestBody: e.target.value })}
-            rows={3}
-            placeholder="Mimi ni mfanya kazi Afisi ya Mkurugenzi wa Mashtaka katika kitengo cha …"
           />
 
           <div className="rounded-xl border border-border bg-warm dark:bg-muted/30 p-3.5 space-y-3">
