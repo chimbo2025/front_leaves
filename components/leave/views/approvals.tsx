@@ -53,6 +53,7 @@ import {
 } from '@/components/leave/shared'
 import { RequestDetail } from '@/components/leave/request-detail'
 import { RequestLetterView } from '@/components/leave/views/request-letter-view'
+import { LetterView } from '@/components/leave/views/letter-view'
 import { ApprovalModal } from '@/components/leave/approval-modal'
 import { HrProcessingModal } from '@/components/leave/hr-processing-modal'
 import { PreviousDecisions } from '@/components/leave/previous-decisions'
@@ -95,6 +96,9 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
   const [decisionTarget, setDecisionTarget] = useState<{ request: LeaveRequest; decision: 'returned' | 'rejected' } | null>(null)
   const [decisionReason, setDecisionReason] = useState('')
   const [approveIsPaid, setApproveIsPaid] = useState(true)
+  const [approveReferenceNumber, setApproveReferenceNumber] = useState('')
+  const [approveLetterBody, setApproveLetterBody] = useState('')
+  const [showPreviewLetter, setShowPreviewLetter] = useState(false)
   // HR is the final processing step: they write and dispatch the response
   // letter before the signature ceremony records the approval.
   const [hrOpen, setHrOpen] = useState(false)
@@ -237,6 +241,8 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
     setApproveTarget({ request: r, stepOrder: step.order, isFinalStep: isFinalStep(r) })
     setApproveReturnDate(r.startDate >= TODAY ? r.startDate : TODAY)
     setApproveComment('')
+    setApproveReferenceNumber(r.referenceNumber ?? '')
+    setApproveLetterBody(r.letterBody ?? `Ombi lako la ${typeOf(r.leaveTypeId)?.name ?? r.leaveTypeId} la mwaka ${new Date().getFullYear()} limeidhinishwa.\n\nKipindi cha likizo: ${r.startDate} hadi ${r.endDate || '—'} (${r.days} siku). Tarehe ya kurudi kazini: ${r.endDate ? r.endDate : '—'}.\n\nAhsante.`)
     setSignatureOpen(false)
     setHrOpen(false)
     setPendingLetter(null)
@@ -517,7 +523,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
 
       <Modal
         open={approveTarget !== null}
-        onClose={() => { setApproveTarget(null); setSignatureOpen(false); setHrOpen(false); setPendingLetter(null); setShowRequestLetter(false) }}
+        onClose={() => { setApproveTarget(null); setSignatureOpen(false); setHrOpen(false); setPendingLetter(null); setShowRequestLetter(false); setApproveReferenceNumber(''); setApproveLetterBody(''); setShowPreviewLetter(false) }}
         title={approveTarget ? `Idhinisha / Approve ${approveTarget.request.ref}` : 'Approve request'}
         subtitle={approveTarget?.isFinalStep && lastStepRole === 'HR' ? 'Mwidhinishaji wa mwisho huweka tarehe ya kurudi kazini na muda wa likizo. / The final approver (HR) sets the return date and granted duration.' : approveTarget?.isFinalStep || lastStepRole ? 'Mwidhinishaji wa mwisho huweka tarehe ya kurudi kazini na muda wa likizo. / The final approver sets the return date and granted duration.' : 'Rekodi uamuzi wako — tarehe ya kurudi na muda zinahifadhiwa kwa mwidhinishaji wa mwisho. / Record your decision.'}
         size="xl"
@@ -573,6 +579,40 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                 rows={2}
                 placeholder="Maoni ya hiari kwa mwombaji…"
               />
+
+              {/* Response Letter preparation fields */}
+              <div className="space-y-3 border-t border-border pt-4">
+                <TextInput
+                  label="Kumb. Na / Reference Number"
+                  placeholder="Ingiza kumbukumbu ya barua"
+                  value={approveReferenceNumber}
+                  onChange={(e) => setApproveReferenceNumber(e.target.value)}
+                />
+                {approveReferenceNumber.trim() === '' && (
+                  <p className="text-[11px] text-rose-600 dark:text-rose-400">Kumb. Na ni lazima.</p>
+                )}
+
+                <div>
+                  <label className="mb-1.5 block text-[12px] font-semibold text-foreground">
+                    Maudhui ya Barua ya Majibu / Response Letter Body
+                  </label>
+                  <textarea
+                    value={approveLetterBody}
+                    onChange={(e) => setApproveLetterBody(e.target.value)}
+                    placeholder="Andika maudhui ya barua ya majibu hapa…"
+                    className="min-h-[420px] w-full resize-y rounded-lg border p-4 leading-7"
+                  />
+                </div>
+
+                <Btn
+                  variant="outline"
+                  type="button"
+                  onClick={() => setShowPreviewLetter(true)}
+                  disabled={!approveReferenceNumber.trim() || !approveLetterBody.trim()}
+                >
+                  Hakiki Barua / Preview Letter
+                </Btn>
+              </div>
             </div>
 
             <div className="flex items-center gap-2">
@@ -609,7 +649,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                   approveComment.trim() || undefined,
                   { path, hash },
                   approveIsPaid,
-                  pendingLetter,
+                  { referenceNumber: approveReferenceNumber.trim(), approvedDays: target.request.days, letterBody: approveLetterBody.trim() },
                 )
                 setPendingLetter(null)
                 setApproveTarget(null)
@@ -634,6 +674,52 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
           </>
         )}
       </Modal>
+
+      {/* Preview letter modal — uses current unsaved form values */}
+      {showPreviewLetter && approveTarget && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+          <div className="relative max-h-[92vh] w-full max-w-4xl overflow-auto rounded-2xl bg-card p-4 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-foreground">Hakiki Barua / Preview Letter (Draft)</h3>
+              <button onClick={() => setShowPreviewLetter(false)} className="text-muted-foreground hover:text-foreground">✕</button>
+            </div>
+            <div className="overflow-x-auto pb-1">
+              <LetterView
+                request={{
+                  id: approveTarget.request.id,
+                  ref: approveReferenceNumber || approveTarget.request.ref,
+                  employeeId: approveTarget.request.employeeId,
+                  leaveTypeId: approveTarget.request.leaveTypeId,
+                  policyId: approveTarget.request.policyId,
+                  startDate: approveTarget.request.startDate,
+                  endDate: approveTarget.request.endDate,
+                  days: approveTarget.request.days,
+                  referenceNumber: approveReferenceNumber,
+                  letterBody: approveLetterBody,
+                  reason: approveTarget.request.reason,
+                  status: approveTarget.request.status,
+                  createdAt: approveTarget.request.createdAt,
+                  documents: approveTarget.request.documents,
+                  steps: approveTarget.request.steps,
+                  isPaid: approveTarget.request.isPaid,
+                  employeeOrg: approveTarget.request.employeeOrg,
+                }}
+                letter={{
+                  referenceNumber: approveReferenceNumber,
+                  approvedDays: approveTarget.request.days,
+                  letterBody: approveLetterBody,
+                }}
+                approvers={approveTarget.request.steps
+                  .filter((s) => Boolean(s.assigneeName))
+                  .map((s) => ({ name: s.assigneeName, role: s.roleLabel }))}
+              />
+            </div>
+            <div className="mt-3 flex justify-end">
+              <Btn variant="ghost" onClick={() => setShowPreviewLetter(false)}>Funga / Close Preview</Btn>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* The employee's application letter has its own document design and is
           never replaced by the DPP response letter. */}
