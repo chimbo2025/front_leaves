@@ -613,6 +613,19 @@ export interface InboxItem {
   out_of_scope: boolean
 }
 
+export interface OfficialLetterDto {
+  id: number
+  leave_request_id: number
+  document_type: string
+  document_version: number
+  reference_number: string | null
+  approved_days: number | null
+  letter_body: string | null
+  letter_issued_at: string | null
+  revoked_at: string | null
+  created_at: string
+}
+
 export interface DocumentDto {
   id: number
   request_id: number
@@ -1162,6 +1175,23 @@ export const leaveApi = {
       request<{ message: string; id: number | string; detached_documents?: number; preserved_payment_cases?: number }>(`/requests/${id}/force`, { method: 'DELETE', body: JSON.stringify({ reason }) }),
     workflow: (id: number | string) => request<{ data: ChainItem[] }>(`/requests/${id}/workflow`),
     approvalInsight: (id: number | string) => request<{ data: ApprovalInsight }>(`/requests/${id}/approval-insight`),
+    /** Official response letters generated for this request (one per approval). */
+    letters: (id: number | string) => request<{ data: OfficialLetterDto[] }>(`/requests/${id}/letters`),
+    /** Download an official response letter as a PDF. */
+    downloadLetter: async (id: number | string, letterId: number | string) => {
+      const headers: Record<string, string> = { Accept: 'application/json' }
+      if (bearerToken) headers.Authorization = `Bearer ${bearerToken}`
+      const res = await fetch(`/api/requests/${id}/letters/${letterId}/download`, { headers })
+      if (!res.ok) throw new ApiError(res.status, 'Letter download failed')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.target = '_blank'
+      link.rel = 'noopener'
+      link.click()
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    },
     inbox: () => request<{ data: InboxItem[] }>('/requests/inbox'),
     preview: (body: { employee_id: string; leave_type_id: string; days?: number | null }) =>
       request<{ data: ChainItem[] }>('/requests/preview', { method: 'POST', body: JSON.stringify(body) }),
