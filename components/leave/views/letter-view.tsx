@@ -127,9 +127,10 @@ export function LetterView({ request, chain = [], letter = null, approvers }: Le
 
   const copyApprovers = dedupeApprovers(chainApprovers)
 
+  // NAKALA list originates from the approval workflow chain (the people who
+  // actually approved the request), rather than a hand-written list. The
+  // accounting officer is appended only when the leave is paid.
   const copies = dedupeApprovers([
-    { name: 'Mkurugenzi Mipango, Uendeshaji na Rasilimali Watu, Afisi ya Mkurugenzi wa Mashtaka, Zanzibar.', role: '' },
-    { name: 'Mkuu wa Mkoa wa Kaskazini- Unguja', role: '' },
     ...copyApprovers,
     ...(request.isPaid
       ? [{ name: 'Mhasibu / Accounting Officer, Afisi ya Mkurugenzi wa Mashtaka, Zanzibar.', role: '' }]
@@ -255,7 +256,7 @@ export function LetterView({ request, chain = [], letter = null, approvers }: Le
       </div>
 
       {/* ── Sign-off ──────────────────────────────────────────────────── */}
-      <div style={{ marginTop: 28, textAlign: 'right', fontSize: 13, lineHeight: 1.55 }}>
+      <div style={{ marginTop: 28, textAlign: 'center', fontSize: 13, lineHeight: 1.55 }}>
         <div>Ahsante</div>
         <div style={{ marginTop: 26, letterSpacing: '.06em' }}>..................................</div>
         <div style={{ fontWeight: 700, marginTop: 6 }}>MWANDAWA I. OTHMAN,</div>
