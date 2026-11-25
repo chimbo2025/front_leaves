@@ -778,22 +778,8 @@ export function RequestsView() {
             placeholder="Brief explanation of the leave request…"
           />
 
-          <div className="rounded-xl border border-border bg-secondary/40 p-3.5 space-y-1.5">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Barua ya ombi / Application letter
-            </p>
-            <p className="text-[12px] text-foreground leading-relaxed">
-              {(() => {
-                const target = employees.find((row) => row.id === form.employeeId)
-                const departmentName = (target ? getDept(target.departmentId)?.name : undefined) ?? 'Afisi Kuu'
-                const typeName = typeOf(form.leaveTypeId)?.name ?? form.leaveTypeId
-                return form.requestBody.trim() || generateEmployeeRequestLetterBody(departmentName, typeName)
-              })()}
-            </p>
-            <p className="text-[10px] text-muted-foreground">
-              Hati hii inaundwa moja kwa moja na itaonekana kwa wapidhinishaji. Unaweza kuiona kamili baada ya kuwasilisha.
-            </p>
-          </div>
+          {/* Application letter is rendered inside the letter view itself;
+              no separate preview block is needed here. */}
 
           <div className="rounded-xl border border-border bg-warm dark:bg-muted/30 p-3.5 space-y-3">
             <label className="flex items-center gap-2 text-[12px] text-foreground">
