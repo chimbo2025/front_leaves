@@ -224,12 +224,6 @@ export function LetterView({ request, chain = [], letter = null, approvers }: Le
 
       {/* ── Body ──────────────────────────────────────────────────────── */}
       <div style={{ flex: 1, fontSize: 13.5, lineHeight: 1.72, textAlign: 'justify' }}>
-        {request.requestBody && (
-          <div style={{ marginBottom: 12, padding: '8px 12px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#f9fafb' }}>
-            <p style={{ margin: '0 0 6px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: MUTED }}>Ombi la mfanyakazi / Employee request</p>
-            <p style={{ margin: 0 }}>{request.requestBody}</p>
-          </div>
-        )}
         {body ? (
           <Paragraphs text={body} />
         ) : (
@@ -237,7 +231,9 @@ export function LetterView({ request, chain = [], letter = null, approvers }: Le
             <p style={{ margin: '0 0 10px' }}>
               Ombi lako la {leaveName} la mwaka {new Date(issuedAt).getFullYear()} limeidhinishwa.
             </p>
-            <p style={{ margin: '0 0 10px' }}>Sababu ya ombi: {request.reason?.trim() || '—'}</p>
+            {request.reason?.trim() && (
+              <p style={{ margin: '0 0 10px' }}>Sababu ya ombi: {request.reason.trim()}</p>
+            )}
           </>
         )}
 

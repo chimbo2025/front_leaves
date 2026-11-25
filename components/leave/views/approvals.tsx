@@ -52,6 +52,7 @@ import {
   type RowMenuItem,
 } from '@/components/leave/shared'
 import { RequestDetail } from '@/components/leave/request-detail'
+import { RequestLetterView } from '@/components/leave/views/request-letter-view'
 import { ApprovalModal } from '@/components/leave/approval-modal'
 import { HrProcessingModal } from '@/components/leave/hr-processing-modal'
 import { PreviousDecisions } from '@/components/leave/previous-decisions'
@@ -92,6 +93,8 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
   const [pendingLetter, setPendingLetter] = useState<LetterData | null>(null)
   const [approvalInsight, setApprovalInsight] = useState<ApprovalInsight | null>(null)
   const [approvalInsightLoading, setApprovalInsightLoading] = useState(false)
+  // Distinct document preview for the employee's application letter.
+  const [showRequestLetter, setShowRequestLetter] = useState(false)
 
   useEffect(() => {
     if (!approveTarget) {
@@ -504,7 +507,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
 
       <Modal
         open={approveTarget !== null}
-        onClose={() => { setApproveTarget(null); setSignatureOpen(false); setHrOpen(false); setPendingLetter(null) }}
+        onClose={() => { setApproveTarget(null); setSignatureOpen(false); setHrOpen(false); setPendingLetter(null); setShowRequestLetter(false) }}
         title={approveTarget ? `Idhinisha / Approve ${approveTarget.request.ref}` : 'Approve request'}
         subtitle={approveTarget?.isFinalStep ? 'Mwidhinishaji wa mwisho huweka tarehe ya kurudi kazini na muda wa likizo. / The final approver sets the return date and granted duration.' : 'Rekodi uamuzi wako — tarehe ya kurudi na muda zinahifadhiwa kwa mwidhinishaji wa mwisho. / Record your decision.'}
         size="md"
@@ -518,12 +521,14 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                   {typeOf(approveTarget.request.leaveTypeId)?.name ?? 'Leave'} · imependekezwa kuanzia {fmtShort(approveTarget.request.startDate)}
                 </p>
                 <p className="text-[11px] text-muted-foreground mt-0.5">{approveTarget.request.reason || 'Hakuna sababu iliyotolewa. / No reason given.'}</p>
-                {approveTarget.request.requestBody && (
-                  <div className="mt-2 rounded-lg border border-border bg-background px-3 py-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">Ombi la likizo / Request letter</p>
-                    <p className="text-[12px] text-foreground whitespace-pre-wrap">{approveTarget.request.requestBody}</p>
-                  </div>
-                )}
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2">
+                  <p className="text-[11px] text-muted-foreground">
+                    Barua ya ombi la mfanyakazi ipo kwenye hati yake tofauti.
+                  </p>
+                  <Btn variant="outline" onClick={() => setShowRequestLetter(true)}>
+                    Angalia barua ya ombi
+                  </Btn>
+                </div>
               </div>
               {approveTarget.isFinalStep ? (
                 <>
@@ -623,6 +628,22 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
           </>
         )}
       </Modal>
+
+      {/* The employee's application letter has its own document design and is
+          never replaced by the DPP response letter. */}
+      {showRequestLetter && approveTarget && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+          <div className="relative max-h-[92vh] w-full max-w-4xl overflow-auto rounded-2xl bg-card p-4 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-foreground">Barua ya ombi la mfanyakazi</h3>
+              <button onClick={() => setShowRequestLetter(false)} className="text-muted-foreground hover:text-foreground">✕</button>
+            </div>
+            <div className="overflow-x-auto pb-1">
+              <RequestLetterView request={approveTarget.request} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Written reason for a return/rejection - mandatory and visible to the
           requester, so they know exactly what to fix or why it was refused. */}

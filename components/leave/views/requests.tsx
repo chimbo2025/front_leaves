@@ -74,6 +74,7 @@ import { ApprovalModal } from '@/components/leave/approval-modal'
 import { HrProcessingModal } from '@/components/leave/hr-processing-modal'
 import { PreviousDecisions } from '@/components/leave/previous-decisions'
 import { ApprovalInsightBoxes } from '@/components/leave/approval-insight-boxes'
+import { RequestLetterView } from '@/components/leave/views/request-letter-view'
 
 interface PartState {
   employeeId: string
@@ -187,6 +188,7 @@ export function RequestsView() {
   const [forceDeleteTarget, setForceDeleteTarget] = useState<LeaveRequest | null>(null)
   const [forceDeleteReason, setForceDeleteReason] = useState('')
   const [approveTarget, setApproveTarget] = useState<{ request: LeaveRequest; stepOrder: number; isFinalStep: boolean } | null>(null)
+  const [showApproveRequestLetter, setShowApproveRequestLetter] = useState(false)
   const [approveReturnDate, setApproveReturnDate] = useState(TODAY)
   const [approveIsPaid, setApproveIsPaid] = useState(true)
   // Same signature ceremony as the Approvals queue: the API refuses
@@ -328,15 +330,21 @@ export function RequestsView() {
     .filter((x): x is NonNullable<typeof x> => x !== null)
 
   const submit = () => {
-    if (!form.reason.trim()) return
     const occurrences = expandRecurrence(form)
+    const targetEmployee = employees.find((row) => row.id === form.employeeId)
+    const departmentName = (targetEmployee ? getDept(targetEmployee.departmentId)?.name : undefined) ?? 'Afisi Kuu'
+    const requestLetterBody =
+      form.requestBody.trim() ||
+      generateEmployeeRequestLetterBody(departmentName, typeOf(form.leaveTypeId)?.name ?? form.leaveTypeId)
     const scheduled = occurrences.map((o, i) => ({
       employeeId: form.employeeId,
       leaveTypeId: form.leaveTypeId,
       startDate: o.startDate,
       endDate: '',
-      reason: occurrences.length > 1 ? `${form.reason} (occurrence ${i + 1} of ${occurrences.length}, ${form.repeat})` : form.reason,
-      requestBody: form.requestBody || undefined,
+      reason: occurrences.length > 1
+        ? [`Mara ya ${i + 1} kati ya ${occurrences.length} (${form.repeat})`, form.reason.trim()].filter(Boolean).join(' — ')
+        : form.reason,
+      requestBody: requestLetterBody || undefined,
       documentName: form.documentName || undefined,
       documentFile: form.documentFile || undefined,
       isHalfDay: form.isHalfDay,
@@ -380,11 +388,15 @@ export function RequestsView() {
 
   const saveEdit = () => {
     if (!editTarget) return
+    const targetEmployee = employees.find((row) => row.id === editForm.employeeId)
+    const departmentName = (targetEmployee ? getDept(targetEmployee.departmentId)?.name : undefined) ?? 'Afisi Kuu'
     updateRequest(editTarget.id, {
       startDate: editForm.startDate,
       endDate: '',
       reason: editForm.reason,
-      requestBody: editForm.requestBody || undefined,
+      requestBody:
+        editForm.requestBody.trim() ||
+        generateEmployeeRequestLetterBody(departmentName, typeOf(editForm.leaveTypeId)?.name ?? editForm.leaveTypeId),
       isHalfDay: editForm.isHalfDay,
     })
     setEditTarget(null)
@@ -758,6 +770,23 @@ export function RequestsView() {
             placeholder="Brief explanation of the leave request…"
           />
 
+          <div className="rounded-xl border border-border bg-secondary/40 p-3.5 space-y-1.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Barua ya ombi / Application letter
+            </p>
+            <p className="text-[12px] text-foreground leading-relaxed">
+              {(() => {
+                const target = employees.find((row) => row.id === form.employeeId)
+                const departmentName = (target ? getDept(target.departmentId)?.name : undefined) ?? 'Afisi Kuu'
+                const typeName = typeOf(form.leaveTypeId)?.name ?? form.leaveTypeId
+                return form.requestBody.trim() || generateEmployeeRequestLetterBody(departmentName, typeName)
+              })()}
+            </p>
+            <p className="text-[10px] text-muted-foreground">
+              Hati hii inaundwa moja kwa moja na itaonekana kwa wapidhinishaji. Unaweza kuiona kamili baada ya kuwasilisha.
+            </p>
+          </div>
+
           <div className="rounded-xl border border-border bg-warm dark:bg-muted/30 p-3.5 space-y-3">
             <label className="flex items-center gap-2 text-[12px] text-foreground">
               <input
@@ -876,7 +905,7 @@ export function RequestsView() {
         subtitle="Change dates or reason. The approval chain and audit trail are preserved."
         size="md"
         footer={
-          <Btn onClick={saveEdit} disabled={!editForm.reason.trim()}>
+          <Btn onClick={saveEdit}>
             <Check className="w-3.5 h-3.5" /> Save changes
           </Btn>
         }
@@ -964,7 +993,7 @@ export function RequestsView() {
 
       <Modal
         open={approveTarget !== null}
-        onClose={() => { setApproveTarget(null); resetSignature() }}
+        onClose={() => { setApproveTarget(null); resetSignature(); setShowApproveRequestLetter(false) }}
         title={approveTarget ? `Idhinisha / Approve ${approveTarget.request.ref}` : 'Approve request'}
         subtitle={approveTarget?.isFinalStep ? 'Mwidhinishaji wa mwisho huweka tarehe ya kurudi kazini na muda wa likizo. / The final approver sets the return date and granted duration.' : 'Rekodi uamuzi wako — tarehe ya kurudi na muda zinahifadhiwa kwa mwidhinishaji wa mwisho. / Record your decision.'}
         size="md"
@@ -980,12 +1009,14 @@ export function RequestsView() {
                 <p className="text-[11px] text-muted-foreground mt-0.5">
                   {approveTarget.request.reason || 'Hakuna sababu iliyotolewa. / No reason given.'}
                 </p>
-                  {approveTarget.request.requestBody && (
-                    <div className="mt-2 rounded-lg border border-border bg-background px-3 py-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">Ombi la likizo / Request letter</p>
-                      <p className="text-[12px] text-foreground whitespace-pre-wrap">{approveTarget.request.requestBody}</p>
-                    </div>
-                  )}
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2">
+                    <p className="text-[11px] text-muted-foreground">
+                      Barua ya ombi la mfanyakazi ipo kwenye hati yake tofauti.
+                    </p>
+                    <Btn variant="outline" onClick={() => setShowApproveRequestLetter(true)}>
+                      Angalia barua ya ombi
+                    </Btn>
+                  </div>
               </div>
               {approveTarget.isFinalStep ? (
                 <>
@@ -1076,6 +1107,22 @@ export function RequestsView() {
           </>
         )}
       </Modal>
+
+      {/* The employee's application letter is a separate document with its
+          own design — never the DPP response letter. */}
+      {showApproveRequestLetter && approveTarget && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+          <div className="relative max-h-[92vh] w-full max-w-4xl overflow-auto rounded-2xl bg-card p-4 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-foreground">Barua ya ombi la mfanyakazi</h3>
+              <button onClick={() => setShowApproveRequestLetter(false)} className="text-muted-foreground hover:text-foreground">✕</button>
+            </div>
+            <div className="overflow-x-auto pb-1">
+              <RequestLetterView request={approveTarget.request} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Return/Reject require a written reason; the requester sees it. */}
       <Modal

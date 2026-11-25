@@ -13,7 +13,7 @@ import {
 } from '@/lib/leave'
 import { Avatar, StatusPill, TypePill, Modal, Btn } from '@/components/leave/shared'
 import { useLeave } from '@/components/leave/leave-context'
-import { LetterView, printLetter } from '@/components/leave/letter-view'
+import { LetterView, RequestLetterView, printLetter } from '@/components/leave/letter-view'
 import { HandoverPanel } from '@/components/leave/handover-panel'
 import { leaveApi, type SignatureSeal, type ChainItem } from '@/lib/leave-api'
 
@@ -37,7 +37,10 @@ export function RequestDetail({ request, isHr = false, actions }: { request: Lea
   const dept = emp ? getDept(emp.departmentId) : undefined
   const visibleDocs = isHr ? request.documents : request.documents.filter((d) => !d.restricted)
 
-  const [showLetter, setShowLetter] = useState(false)
+  // Which document the preview modal is showing. The employee application
+  // letter and the HR response letter are two distinct documents and are
+  // never rendered by the same component.
+  const [letterKind, setLetterKind] = useState<'request' | 'response' | null>(null)
   const letterHostRef = useRef<HTMLDivElement>(null)
   // Approval signature seals for this request — fetched lazily when the
   // letter is first opened. Seals are per-decision; the letter matches
@@ -49,7 +52,7 @@ export function RequestDetail({ request, isHr = false, actions }: { request: Lea
   const [chain, setChain] = useState<ChainItem[]>([])
 
   useEffect(() => {
-    if (!showLetter) return
+    if (letterKind !== 'response') return
     let cancelled = false
     leaveApi.requests
       .signaturesFor(request.id)
@@ -60,28 +63,40 @@ export function RequestDetail({ request, isHr = false, actions }: { request: Lea
       .then((res) => { if (!cancelled) setChain(res.data) })
       .catch(() => { if (!cancelled) setChain([]) })
     return () => { cancelled = true }
-  }, [showLetter, request.id])
+  }, [letterKind, request.id])
 
   const printLetterNow = () => {
     const page = letterHostRef.current?.querySelector<HTMLElement>('.letter-page')
     if (page) printLetter(page)
   }
 
+  const hasResponseLetter =
+    Boolean(request.letterBody?.trim()) ||
+    Boolean(request.letterIssuedAt) ||
+    request.status === 'approved'
+
   return (
     <div className="space-y-5">
-      {/* Swahili application letter — screen view + isolated-iframe print.
-          Visible to everyone who can see the request; before a decision it
-          renders with the INASUBIRI (pending) stamp. */}
+      {/* Two separate documents: the employee's application letter (always
+          available) and the DPP response letter (only once the chain has
+          completed). Each opens its own document design. */}
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-warm dark:bg-muted/30 px-3.5 py-2.5">
         <div className="flex items-center gap-1.5 min-w-0">
           <MailOpen className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           <p className="text-[11px] text-muted-foreground truncate">
-            Barua ya ombi (Swahili) — sahihi na chapa ya hali ya sasa, tayari kuchapisha.
+            Barua ya ombi la mfanyakazi na barua ya majibu ya Mkurugenzi.
           </p>
         </div>
-        <Btn variant="outline" onClick={() => setShowLetter(true)}>
-          <FileText className="h-3.5 w-3.5" /> Angalia barua
-        </Btn>
+        <div className="flex flex-wrap items-center gap-2">
+          <Btn variant="outline" onClick={() => setLetterKind('request')}>
+            <FileText className="h-3.5 w-3.5" /> Barua ya ombi
+          </Btn>
+          {hasResponseLetter && (
+            <Btn variant="outline" onClick={() => setLetterKind('response')}>
+              <FileText className="h-3.5 w-3.5" /> Barua ya majibu
+            </Btn>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -137,7 +152,9 @@ export function RequestDetail({ request, isHr = false, actions }: { request: Lea
 
       <div className="rounded-xl border border-border p-4">
         <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold mb-2">Reason</p>
-        <p className="text-sm text-foreground leading-relaxed">{request.reason}</p>
+        <p className="text-sm text-foreground leading-relaxed">
+          {request.reason?.trim() || 'Hakuna sababu iliyotolewa. / No reason given.'}
+        </p>
       </div>
 
       <div className="rounded-xl border border-border p-4">
@@ -259,10 +276,18 @@ export function RequestDetail({ request, isHr = false, actions }: { request: Lea
       ) : null}
 
       <Modal
-        open={showLetter}
-        onClose={() => setShowLetter(false)}
-        title={`Barua ya Ombi ya Likizo — ${request.ref}`}
-        subtitle="Hati rasmi ya maombi kwa Kiswahili — inaonyesha hali ya sasa, sahihi na sehemu ya uidhinishaji."
+        open={letterKind !== null}
+        onClose={() => setLetterKind(null)}
+        title={
+          letterKind === 'request'
+            ? `Barua ya Ombi la Likizo — ${request.ref}`
+            : `Barua ya Majibu — ${request.ref}`
+        }
+        subtitle={
+          letterKind === 'request'
+            ? 'Ombi la mfanyakazi kwa Mkurugenzi wa Mashtaka — linaonyesha taarifa za ombi na sehemu ya sahihi ya mfanyakazi.'
+            : 'Barua rasmi ya majibu ya Mkurugenzi wa Mashtaka — inaonyesha uamuzi, siku zilizoidhinishwa na nakala.'
+        }
         size="xl"
         footer={
           <div className="flex items-center justify-between w-full gap-3">
@@ -276,7 +301,11 @@ export function RequestDetail({ request, isHr = false, actions }: { request: Lea
         }
       >
         <div ref={letterHostRef} className="overflow-x-auto pb-1">
-          <LetterView request={request} signatures={signatures} chain={chain} />
+          {letterKind === 'request' ? (
+            <RequestLetterView request={request} />
+          ) : (
+            <LetterView request={request} signatures={signatures} chain={chain} />
+          )}
         </div>
       </Modal>
     </div>
