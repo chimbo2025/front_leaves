@@ -1,12 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { FileText, Lock, Eye, Unlock, Upload, ShieldCheck, Trash2, Plus, HardDrive, FileStack, Download } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { fmtShort, getEmployee, type Document } from '@/lib/leave'
 import { useLeave } from '@/components/leave/leave-context'
 import { leaveApi } from '@/lib/leave-api'
+import type { OfficialLetterDto } from '@/lib/leave-api'
 import {
   SectionHeading,
   Panel,
@@ -51,14 +52,54 @@ export function DocumentsView() {
   const [visFilter, setVisFilter] = useState('visible')
   const [detail, setDetail] = useState<{ doc: Document & { requestId: string; requestRef: string; employeeId: string } } | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string; requestId: string } | null>(null)
+  const [officialLetters, setOfficialLetters] = useState<Array<OfficialLetterDto & { requestId: string; requestRef: string; employeeId: string }>>([])
 
   const restrictedVisible = can('documents', 'view_medical_documents')
   const canUploadDocs = can('documents', 'create')
   const canDeleteDocs = can('documents', 'delete')
 
-  const allDocs = requests
+  const uploadedDocs = requests
     .flatMap((r) => r.documents.map((d) => ({ ...d, requestId: r.id, requestRef: r.ref, employeeId: r.employeeId })))
     .filter((d) => !d.restricted || restrictedVisible)
+
+  const letterDocs = officialLetters.map((l) => ({
+    id: `letter-${l.id}`,
+    name: `Barua ya Majibu v${l.document_version} (${l.reference_number ?? '—'})`,
+    type: 'Response letter',
+    uploadedBy: '',
+    uploadedByLabel: 'HR',
+    restricted: false,
+    size: '—',
+    uploadedAt: l.letter_issued_at ?? l.created_at,
+    requestId: l.requestId,
+    requestRef: l.requestRef,
+    employeeId: l.employeeId,
+    isOfficialLetter: true,
+    letterId: l.id,
+  }))
+
+  const allDocs = [...uploadedDocs, ...letterDocs]
+
+  // Fetch official response letters for all requests
+  useEffect(() => {
+    let cancelled = false
+    const fetchLetters = async () => {
+      const results: Array<OfficialLetterDto & { requestId: string; requestRef: string; employeeId: string }> = []
+      for (const r of requests) {
+        try {
+          const res = await leaveApi.requests.letters(r.id)
+          for (const l of res.data) {
+            results.push({ ...l, requestId: r.id, requestRef: r.ref, employeeId: r.employeeId })
+          }
+        } catch {
+          // ignore
+        }
+      }
+      if (!cancelled) setOfficialLetters(results)
+    }
+    void fetchLetters()
+    return () => { cancelled = true }
+  }, [requests])
 
   const visible = allDocs.filter((d) => {
     if (visFilter === 'visible' && d.restricted) return false
@@ -95,13 +136,20 @@ export function DocumentsView() {
     setOpen(false)
   }
 
-  const buildMenu = (d: (typeof allDocs)[number]): RowMenuItem[] => [
-    { icon: Eye, label: 'View document details', onClick: () => setDetail({ doc: d }) },
-    { icon: Download, label: 'View / Download document', onClick: () => { void (async () => { try { await leaveApi.requests.downloadDocument(d.requestId, d.id) } catch (err) { toast.error(err instanceof Error ? err.message : 'Imeshindikana kupakua hati. / Failed to download document.') } })() } },
-    ...(canDeleteDocs
-      ? [{ icon: Trash2, label: 'Delete document', tone: 'danger' as const, onClick: () => setDeleteTarget({ id: d.id, name: d.name, requestId: d.requestId }) }]
-      : []),
-  ]
+  const buildMenu = (d: (typeof allDocs)[number] & { isOfficialLetter?: boolean; letterId?: number }): RowMenuItem[] => {
+    const items: RowMenuItem[] = [
+      { icon: Eye, label: 'View document details', onClick: () => setDetail({ doc: d }) },
+    ]
+    if (d.isOfficialLetter && d.letterId) {
+      items.push({ icon: Download, label: 'View / Download letter', onClick: () => { void (async () => { try { await leaveApi.requests.downloadLetter(d.requestId, d.letterId!) } catch (err) { toast.error(err instanceof Error ? err.message : 'Imeshindikana kupakua barua. / Failed to download letter.') } })() } })
+    } else {
+      items.push({ icon: Download, label: 'View / Download document', onClick: () => { void (async () => { try { await leaveApi.requests.downloadDocument(d.requestId, d.id) } catch (err) { toast.error(err instanceof Error ? err.message : 'Imeshindikana kupakua hati. / Failed to download document.') } })() } })
+    }
+    if (canDeleteDocs && !d.isOfficialLetter) {
+      items.push({ icon: Trash2, label: 'Delete document', tone: 'danger' as const, onClick: () => setDeleteTarget({ id: d.id, name: d.name, requestId: d.requestId }) })
+    }
+    return items
+  }
 
   return (
     <div className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-8 py-6 space-y-6">
