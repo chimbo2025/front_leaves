@@ -52,7 +52,7 @@ export function RequestDetail({ request, isHr = false, actions }: { request: Lea
   const [chain, setChain] = useState<ChainItem[]>([])
 
   useEffect(() => {
-    if (letterKind !== 'response') return
+    if (letterKind === null) return
     let cancelled = false
     leaveApi.requests
       .signaturesFor(request.id)
@@ -84,7 +84,7 @@ export function RequestDetail({ request, isHr = false, actions }: { request: Lea
         <div className="flex items-center gap-1.5 min-w-0">
           <MailOpen className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           <p className="text-[11px] text-muted-foreground truncate">
-            Barua ya ombi la mfanyakazi na barua ya majibu ya Mkurugenzi.
+            Barua ya ombi (Swahili) — sahihi na chapa ya hali ya sasa, tayari kuchapisha.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -285,7 +285,7 @@ export function RequestDetail({ request, isHr = false, actions }: { request: Lea
         }
         subtitle={
           letterKind === 'request'
-            ? 'Ombi la mfanyakazi kwa Mkurugenzi wa Mashtaka — linaonyesha taarifa za ombi na sehemu ya sahihi ya mfanyakazi.'
+            ? 'Hati rasmi ya maombi kwa Kiswahili — inaonyesha hali ya sasa, sahihi na sehemu ya uidhinishaji.'
             : 'Barua rasmi ya majibu ya Mkurugenzi wa Mashtaka — inaonyesha uamuzi, siku zilizoidhinishwa na nakala.'
         }
         size="xl"
@@ -302,7 +302,7 @@ export function RequestDetail({ request, isHr = false, actions }: { request: Lea
       >
         <div ref={letterHostRef} className="overflow-x-auto pb-1">
           {letterKind === 'request' ? (
-            <RequestLetterView request={request} />
+            <RequestLetterView request={request} signatures={signatures} chain={chain} />
           ) : (
             <LetterView request={request} signatures={signatures} chain={chain} />
           )}
