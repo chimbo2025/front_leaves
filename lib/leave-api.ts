@@ -1176,12 +1176,12 @@ export const leaveApi = {
     workflow: (id: number | string) => request<{ data: ChainItem[] }>(`/requests/${id}/workflow`),
     approvalInsight: (id: number | string) => request<{ data: ApprovalInsight }>(`/requests/${id}/approval-insight`),
     /** Official response letters generated for this request (one per approval). */
-    letters: (id: number | string) => request<{ data: OfficialLetterDto[] }>(`/requests/${id}/letters`),
+    letters: (id: number | string) => request<{ data: OfficialLetterDto[] }>(`/leave-requests/${id}/letters`),
     /** Download an official response letter as a PDF. */
     downloadLetter: async (id: number | string, letterId: number | string) => {
       const headers: Record<string, string> = { Accept: 'application/json' }
       if (bearerToken) headers.Authorization = `Bearer ${bearerToken}`
-      const res = await fetch(`/api/requests/${id}/letters/${letterId}/download`, { headers })
+      const res = await fetch(`/api/leave-requests/${id}/letters/${letterId}/download`, { headers })
       if (!res.ok) throw new ApiError(res.status, 'Letter download failed')
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
