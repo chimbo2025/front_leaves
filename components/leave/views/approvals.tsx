@@ -520,7 +520,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
         onClose={() => { setApproveTarget(null); setSignatureOpen(false); setHrOpen(false); setPendingLetter(null); setShowRequestLetter(false) }}
         title={approveTarget ? `Idhinisha / Approve ${approveTarget.request.ref}` : 'Approve request'}
         subtitle={approveTarget?.isFinalStep && lastStepRole === 'HR' ? 'Mwidhinishaji wa mwisho huweka tarehe ya kurudi kazini na muda wa likizo. / The final approver (HR) sets the return date and granted duration.' : approveTarget?.isFinalStep || lastStepRole ? 'Mwidhinishaji wa mwisho huweka tarehe ya kurudi kazini na muda wa likizo. / The final approver sets the return date and granted duration.' : 'Rekodi uamuzi wako — tarehe ya kurudi na muda zinahifadhiwa kwa mwidhinishaji wa mwisho. / Record your decision.'}
-        size="md"
+        size="xl"
       >
         {approveTarget && (
           <>
