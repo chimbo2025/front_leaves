@@ -1110,7 +1110,7 @@ export function RequestsView() {
                 const target = approveTarget
                 setSignatureOpen(false)
                 if (!target) return
-                decide(target.request.id, target.stepOrder, 'approved', approveComment.trim() || undefined, target.isFinalStep ? approveReturnDate : undefined, path, hash, approveIsPaid, { referenceNumber: approveReferenceNumber.trim(), approvedDays: target.request.days, letterBody: approveLetterBody.trim() })
+                decide(target.request.id, target.stepOrder, 'approved', approveComment.trim() || undefined, target.isFinalStep ? approveReturnDate : undefined, path, hash, approveIsPaid, { referenceNumber: approveReferenceNumber.trim(), approvedDays: approvalProposedDays > 0 ? approvalProposedDays : target.request.days, letterBody: approveLetterBody.trim() })
                 resetSignature()
                 setApproveTarget(null)
               }}
@@ -1166,7 +1166,7 @@ export function RequestsView() {
                 }}
                 letter={{
                   referenceNumber: approveReferenceNumber,
-                  approvedDays: approveTarget.request.days,
+                  approvedDays: approvalProposedDays > 0 ? approvalProposedDays : approveTarget.request.days,
                   letterBody: approveLetterBody,
                 }}
                 approvers={approveTarget.request.steps

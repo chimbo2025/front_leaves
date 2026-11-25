@@ -652,7 +652,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                   approveComment.trim() || undefined,
                   { path, hash },
                   approveIsPaid,
-                  { referenceNumber: approveReferenceNumber.trim(), approvedDays: target.request.days, letterBody: approveLetterBody.trim() },
+                  { referenceNumber: approveReferenceNumber.trim(), approvedDays: proposedDays > 0 ? proposedDays : target.request.days, letterBody: approveLetterBody.trim() },
                 )
                 setPendingLetter(null)
                 setApproveTarget(null)
@@ -709,7 +709,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                 }}
                 letter={{
                   referenceNumber: approveReferenceNumber,
-                  approvedDays: approveTarget.request.days,
+                  approvedDays: proposedDays > 0 ? proposedDays : approveTarget.request.days,
                   letterBody: approveLetterBody,
                 }}
                 approvers={approveTarget.request.steps
