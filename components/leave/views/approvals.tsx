@@ -59,6 +59,14 @@ import { PreviousDecisions } from '@/components/leave/previous-decisions'
 import { ApprovalInsightBoxes } from '@/components/leave/approval-insight-boxes'
 import { leaveApi, type ApprovalInsight } from '@/lib/leave-api'
 
+/** The role of the final (last) approver in the workflow chain. */
+function getLastStepRole(request: LeaveRequest): string | null {
+  const steps = request.steps
+  if (!steps.length) return null
+  const last = steps[steps.length - 1]
+  return last.roleLabel ?? String(last.role ?? '') ?? null
+}
+
 const STEP_STYLE: Record<StepStatus, string> = {
   pending: 'border-border bg-warm dark:bg-muted/30',
   queued: 'border-sky-200 bg-sky-50/60 dark:bg-sky-950/30 dark:border-sky-900',
@@ -174,9 +182,11 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
     ? dayCount(approveTarget.request.startDate, approveReturnDate)
     : 0
 
-  // The chain step currently waiting. HR's step is the response-letter step.
-  const currentApprovalStep = approveTarget ? nextStep(approveTarget.request) : undefined
-  const hrFinal = Boolean(approveTarget?.isFinalStep && currentApprovalStep?.role === 'HR')
+  // Only the final approver in the chain may set the return date. The final
+  // approver is the last step regardless of which role holds it.
+  const lastStepRole = approveTarget ? getLastStepRole(approveTarget.request) : null
+  const isLastApprover = Boolean(approveTarget?.isFinalStep && lastStepRole)
+  const hrFinal = Boolean(approveTarget?.isFinalStep && lastStepRole === 'HR')
 
   const toHrRequestData = (r: LeaveRequest): LeaveRequestData => ({
     id: r.id,
@@ -509,7 +519,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
         open={approveTarget !== null}
         onClose={() => { setApproveTarget(null); setSignatureOpen(false); setHrOpen(false); setPendingLetter(null); setShowRequestLetter(false) }}
         title={approveTarget ? `Idhinisha / Approve ${approveTarget.request.ref}` : 'Approve request'}
-        subtitle={approveTarget?.isFinalStep ? 'Mwidhinishaji wa mwisho huweka tarehe ya kurudi kazini na muda wa likizo. / The final approver sets the return date and granted duration.' : 'Rekodi uamuzi wako — tarehe ya kurudi na muda zinahifadhiwa kwa mwidhinishaji wa mwisho. / Record your decision.'}
+        subtitle={approveTarget?.isFinalStep && lastStepRole === 'HR' ? 'Mwidhinishaji wa mwisho huweka tarehe ya kurudi kazini na muda wa likizo. / The final approver (HR) sets the return date and granted duration.' : approveTarget?.isFinalStep || lastStepRole ? 'Mwidhinishaji wa mwisho huweka tarehe ya kurudi kazini na muda wa likizo. / The final approver sets the return date and granted duration.' : 'Rekodi uamuzi wako — tarehe ya kurudi na muda zinahifadhiwa kwa mwidhinishaji wa mwisho. / Record your decision.'}
         size="md"
       >
         {approveTarget && (
@@ -530,7 +540,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                   </Btn>
                 </div>
               </div>
-              {approveTarget.isFinalStep ? (
+              {lastStepRole ? (
                 <>
                   <TextInput
                     type="date"
@@ -572,9 +582,9 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
             <div className="flex items-center gap-2">
               <Btn
                 variant="emerald"
-                disabled={approveTarget?.isFinalStep === true && !approveReturnDate}
+                disabled={Boolean(lastStepRole) && !approveReturnDate}
                 onClick={() => {
-                  if (approveTarget && approveTarget.isFinalStep && nextStep(approveTarget.request)?.role === 'HR') {
+                  if (lastStepRole === 'HR') {
                     setHrOpen(true)
                   } else {
                     setSignatureOpen(true)
@@ -599,7 +609,7 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                 doDecide(
                   target.request,
                   'approved',
-                  target.isFinalStep ? approveReturnDate : undefined,
+                  Boolean(lastStepRole) ? approveReturnDate : undefined,
                   approveComment.trim() || undefined,
                   { path, hash },
                   approveIsPaid,

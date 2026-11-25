@@ -73,8 +73,15 @@ import { RequestDetail } from '@/components/leave/request-detail'
 import { ApprovalModal } from '@/components/leave/approval-modal'
 import { HrProcessingModal } from '@/components/leave/hr-processing-modal'
 import { PreviousDecisions } from '@/components/leave/previous-decisions'
-import { ApprovalInsightBoxes } from '@/components/leave/approval-insight-boxes'
 import { RequestLetterView } from '@/components/leave/views/request-letter-view'
+
+/** Return-date control applies to the last approver in the chain, regardless of role. */
+function getLastStepRole(request: LeaveRequest): string | null {
+  const steps = request.steps
+  if (!steps.length) return null
+  const last = steps[steps.length - 1]
+  return last.roleLabel ?? String(last.role ?? '') ?? null
+}
 
 interface PartState {
   employeeId: string
@@ -430,10 +437,11 @@ export function RequestsView() {
     : 0
 
   const currentApprovalStep = approveTarget ? nextPending(approveTarget.request) : undefined
+  const lastStepRole = approveTarget ? getLastStepRole(approveTarget.request) : null
   const hrFinal = Boolean(
     approveTarget
     && approveTarget.isFinalStep
-    && currentApprovalStep?.role === 'HR',
+    && lastStepRole === 'HR',
   )
 
   const toHrRequestData = (r: LeaveRequest): LeaveRequestData => ({
@@ -995,7 +1003,7 @@ export function RequestsView() {
         open={approveTarget !== null}
         onClose={() => { setApproveTarget(null); resetSignature(); setShowApproveRequestLetter(false) }}
         title={approveTarget ? `Idhinisha / Approve ${approveTarget.request.ref}` : 'Approve request'}
-        subtitle={approveTarget?.isFinalStep ? 'Mwidhinishaji wa mwisho huweka tarehe ya kurudi kazini na muda wa likizo. / The final approver sets the return date and granted duration.' : 'Rekodi uamuzi wako — tarehe ya kurudi na muda zinahifadhiwa kwa mwidhinishaji wa mwisho. / Record your decision.'}
+        subtitle={approveTarget?.isFinalStep && lastStepRole === 'HR' ? 'Mwidhinishaji wa mwisho huweka tarehe ya kurudi kazini na muda wa likizo. / The final approver (HR) sets the return date and granted duration.' : approveTarget?.isFinalStep || lastStepRole ? 'Mwidhinishaji wa mwisho huweka tarehe ya kurudi kazini na mudo wa likizo. / The final approver sets the return date and granted duration.' : 'Rekodi uamuzi wako — tarehe ya kurudi na muda zinahifadhiwa kwa mwidhinishaji wa mwisho. / Record your decision.'}
         size="md"
       >
         {approveTarget && (
@@ -1018,7 +1026,7 @@ export function RequestsView() {
                     </Btn>
                   </div>
               </div>
-              {approveTarget.isFinalStep ? (
+              {lastStepRole ? (
                 <>
                   <TextInput
                     type="date"
@@ -1040,14 +1048,7 @@ export function RequestsView() {
                   Hatua ya kati ya kuidhinisha. Tarehe ya kurudi na siku zilizopewa zinahifadhiwa kwa mwidhinishaji wa mwisho.
                 </p>
               )}
-              <ApprovalInsightBoxes
-                insight={approvalInsight}
-                loading={approvalInsightLoading}
-                isFinalStep={approveTarget.isFinalStep}
-                isAnnual={approveTarget.request.leaveTypeId === annualTypeId}
-                proposedDays={approvalProposedDays}
-                fallbackBalance={approvalAnnualBalance}
-              />
+              {/* Insight boxes removed — balance and payment-cycle guidance are no longer shown here. */}
               <TextArea
                 label="Maoni ya uamuzi (yanahifadhiwa)"
                 value={approveComment}
@@ -1060,9 +1061,9 @@ export function RequestsView() {
             <div className="flex items-center gap-2">
               <Btn
                 variant="emerald"
-                disabled={approveTarget?.isFinalStep === true && !approveReturnDate}
+                disabled={Boolean(lastStepRole) && !approveReturnDate}
                 onClick={() => {
-                  if (approveTarget && approveTarget.isFinalStep && nextPending(approveTarget.request)?.role === 'HR') {
+                  if (lastStepRole && lastStepRole === 'HR') {
                     setHrOpen(true)
                   } else {
                     setSignatureOpen(true)
@@ -1084,7 +1085,7 @@ export function RequestsView() {
                 const target = approveTarget
                 setSignatureOpen(false)
                 if (!target) return
-                decide(target.request.id, target.stepOrder, 'approved', approveComment.trim() || undefined, target.isFinalStep ? approveReturnDate : undefined, path, hash, approveIsPaid, pendingLetter)
+                decide(target.request.id, target.stepOrder, 'approved', approveComment.trim() || undefined, Boolean(lastStepRole) ? approveReturnDate : undefined, path, hash, approveIsPaid, pendingLetter)
                 resetSignature()
                 setApproveTarget(null)
               }}
