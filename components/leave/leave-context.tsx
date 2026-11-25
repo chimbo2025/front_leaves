@@ -345,8 +345,8 @@ function day(s?: string | null): string {
  *  ones a flat staff-role payload can never reassign into readable copy. */
 const ROLE_REFUSAL_TEXT: Record<string, string> = {
   FINAL_AUTHORITY: 'Final Authority is appointed by migration and cannot be granted or removed here.',
-  DEPT_HEAD: 'Department Head must be appointed from the department head picker.',
-  ZONAL_HEAD: 'Zone Head must be appointed from the zone head picker.',
+  DEPT_HEAD: 'Department Head must be appointed from the head picker on Settings → Zones & Departments → Departments.',
+  ZONAL_HEAD: 'Zone Head must be appointed from the head picker on Settings → Zones & Departments → Zones.',
 }
 
 async function safe<T>(p: Promise<T>): Promise<T | undefined> {

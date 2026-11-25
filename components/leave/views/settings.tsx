@@ -80,9 +80,10 @@ function RowAvatar({ e, size = 'sm' }: { e: EmployeeRow; size?: 'sm' | 'md' | 'l
 const PASSWORD_PRESETS = ['Password123', 'Password1', 'ChangeMe1', 'Welcome2026']
 
 /** Roles the flat staff-role payload can never (re)assign: Final Authority is
- *  migration-appointed, and head roles are scoped grants made from the unit
- *  pages. They stay visible only when the employee already holds them. */
-const NON_ASSIGNABLE_ROLES = new Set<string>([])
+ *  migration-appointed, and head roles are scoped grants made from the
+ *  Departments / Zones head pickers. They stay visible only when the employee
+ *  already holds them, so an existing grant can still be unchecked/removed. */
+const NON_ASSIGNABLE_ROLES = new Set<string>(['FINAL_AUTHORITY', 'DEPT_HEAD', 'ZONAL_HEAD'])
 
 function passwordIsValid(value: string): boolean {
   return value.length >= 8 && /[a-z]/.test(value) && /[A-Z]/.test(value) && /\d/.test(value)
@@ -128,6 +129,12 @@ export function SettingsView() {
     allZones,
     allDepts,
     rolesOf,
+    deptHeads,
+    zoneHeads,
+    setDepartmentHead,
+    clearDepartmentHead,
+    setZoneHead,
+    clearZoneHead,
   } = useLeave()
   const [tab, setTab] = useState('staff')
   const [orgTab, setOrgTab] = useState('zones')
@@ -273,6 +280,23 @@ export function SettingsView() {
 
   const zoneName = (id: string) => allZones.find((z) => z.id === id)?.name ?? id
 
+  // Head pickers list every active employee: a head may legitimately come from
+  // another department/zone, so filtering by placement would hide valid people.
+  const headCandidates = employees
+    .filter((e) => e.active)
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  // Keep the current holder selectable even if they are inactive or outside the
+  // viewer's scoped employee list; otherwise the select would render blank.
+  const headOptions = (current?: { employee_id: string; full_name: string } | null) => {
+    const options = headCandidates.map((e) => ({ id: e.id, name: e.name }))
+    if (current && !options.some((o) => o.id === current.employee_id)) {
+      options.unshift({ id: current.employee_id, name: current.full_name })
+    }
+    return options
+  }
+
   const roleName = (role: string): string => {
     const key =
       typeof role === 'string'
@@ -289,6 +313,15 @@ export function SettingsView() {
       key
     )
   }
+
+  // Legacy drift: a structural head role held with no department/zone scope.
+  // The backend refuses to re-save it, so surface the reason before the user
+  // hits a 422 and has to guess.
+  const legacyHeadRoles = (editTarget?.roleIds ?? []).filter(
+    (id) =>
+      (id === 'DEPT_HEAD' || id === 'ZONAL_HEAD') &&
+      !(editTarget?.scopedGrants ?? []).some((grant) => grant.roleId === id),
+  )
 
   const roleKey = (role: unknown): string => {
     if (typeof role === 'string') return role
@@ -417,7 +450,7 @@ export function SettingsView() {
     const held = editTarget.roleIds ?? []
     const blockedAdd = editDraft.roleIds.find((id) => NON_ASSIGNABLE_ROLES.has(id) && !held.includes(id))
     if (blockedAdd) {
-      toast.error(`${roleName(blockedAdd)} haiwezi kugawiwa hapa. Mamlaka ya Mwisho huteuliwa kwa uhamishaji wa mfumo; wakuu wa idara na kanda huteuliwa kutoka kurasa zao za kitengo.`)
+      toast.error(`${roleName(blockedAdd)} haiwezi kugawiwa hapa. Mamlaka ya Mwisho huteuliwa kwa uhamishaji wa mfumo; wakuu wa idara na kanda huteuliwa kwenye kichagua cha Mkuu (Settings → Zones & Departments).`)
       return
     }
     if (held.includes('FINAL_AUTHORITY') && !editDraft.roleIds.includes('FINAL_AUTHORITY')) {
@@ -855,6 +888,30 @@ export function SettingsView() {
                         {z.isCoordination ? 'Coordination office, decentralized but accountable to the DPP.' : z.isPemba ? 'Regional prosecution office.' : z.isHQ ? 'Central office — Unguja.' : 'Regional prosecution office.'}
                         {' '}{custom && 'Configured at runtime in the admin console.'}
                       </p>
+                      <div className="mt-2 flex items-center gap-2">
+                        <UserCog className="h-3.5 w-3.5 flex-shrink-0 text-teal-700" />
+                        <span className="text-[11px] font-medium text-muted-foreground">Zone head</span>
+                        {canManage ? (
+                          <select
+                            aria-label={`Zone head for ${z.name}`}
+                            value={zoneHeads[z.id]?.employee_id ?? ''}
+                            onChange={(e) => {
+                              const employeeId = e.target.value
+                              void (employeeId ? setZoneHead(z.id, employeeId) : clearZoneHead(z.id))
+                            }}
+                            className="h-7 min-w-0 flex-1 rounded-lg border border-input bg-background px-2 text-[11px] text-foreground outline-none focus:border-teal-600"
+                          >
+                            <option value="">— none —</option>
+                            {headOptions(zoneHeads[z.id]).map((option) => (
+                              <option key={option.id} value={option.id}>{option.name}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="text-[11px] font-medium text-foreground">
+                            {zoneHeads[z.id]?.full_name ?? '—'}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   )
                 })}
@@ -897,6 +954,30 @@ export function SettingsView() {
                           {d.name} {custom && <span className="ml-1 rounded-full bg-teal-600 text-white text-[9px] font-bold px-1.5 py-0.5">CUSTOM</span>}
                         </p>
                         <p className="text-[10px] text-muted-foreground">{zoneName(d.zoneId)}</p>
+                        <div className="mt-1.5 flex items-center gap-1.5">
+                          <UserCog className="h-3.5 w-3.5 flex-shrink-0 text-teal-700" />
+                          <span className="text-[10px] font-medium text-muted-foreground">Head</span>
+                          {canManage ? (
+                            <select
+                              aria-label={`Department head for ${d.name}`}
+                              value={deptHeads[d.id]?.employee_id ?? ''}
+                              onChange={(e) => {
+                                const employeeId = e.target.value
+                                void (employeeId ? setDepartmentHead(d.id, employeeId) : clearDepartmentHead(d.id))
+                              }}
+                              className="h-7 min-w-0 flex-1 rounded-lg border border-input bg-background px-2 text-[11px] text-foreground outline-none focus:border-teal-600"
+                            >
+                              <option value="">— none —</option>
+                              {headOptions(deptHeads[d.id]).map((option) => (
+                                <option key={option.id} value={option.id}>{option.name}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span className="text-[11px] font-medium text-foreground">
+                              {deptHeads[d.id]?.full_name ?? '—'}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       {canManage && (
                         <>
@@ -1582,7 +1663,7 @@ export function SettingsView() {
             </SelectInput>
             <MultiSelect
               label="Employee roles"
-              hint="Roles belong to the employee and are assigned here; positions do not grant roles. Final Authority is migration-appointed, and department/zone heads are appointed from their unit pages."
+              hint="Roles belong to the employee and are assigned here; positions do not grant roles. Final Authority is migration-appointed, and department/zone heads are appointed from the Zones & Departments head pickers."
               placeholder="Select approval roles…"
               options={rolePickerOptions()}
               value={regDraft.role_ids}
@@ -1853,12 +1934,20 @@ export function SettingsView() {
           <TextInput label="New password" type="password" value={editDraft.password} onChange={(e) => setEditDraft({ ...editDraft, password: e.target.value })} placeholder="Leave blank to keep the current one" autoComplete="new-password" />
           <MultiSelect
             label="Approval roles"
-            hint="Unconditional roles are replaced on save. Final Authority is migration-appointed and department/zone heads are appointed from their unit pages — they appear here only when already held."
+            hint="Unconditional roles are replaced on save. Final Authority is migration-appointed and department/zone heads are appointed from the Zones & Departments head pickers — they appear here only when already held (uncheck to remove a legacy grant)."
             placeholder="Select approval roles…"
             options={rolePickerOptions(editTarget?.roleIds ?? [])}
             value={editDraft.roleIds}
             onChange={(next) => setEditDraft((d) => ({ ...d, roleIds: next }))}
           />
+          {legacyHeadRoles.length > 0 && (
+            <p className="text-[10px] leading-relaxed text-amber-700 dark:text-amber-300">
+              {legacyHeadRoles.map(roleName).join(', ')} {legacyHeadRoles.length === 1 ? 'is' : 'are'} held
+              without a department/zone scope (legacy grant). Uncheck to remove
+              {legacyHeadRoles.length === 1 ? ' it' : ' them'}, then appoint the head from the
+              Zones &amp; Departments tab.
+            </p>
+          )}
           <p className="text-[10px] text-muted-foreground">The position drives the job title shown across the system; approval roles control what this person can approve.</p>
         </div>
       </Modal>
