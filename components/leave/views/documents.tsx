@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { fmtShort, getEmployee, type Document } from '@/lib/leave'
 import { useLeave } from '@/components/leave/leave-context'
-import { leaveApi } from '@/lib/leave-api'
+import { leaveApi, ApiError } from '@/lib/leave-api'
 import type { OfficialLetterDto } from '@/lib/leave-api'
 import {
   SectionHeading,
@@ -143,7 +143,7 @@ export function DocumentsView() {
     if (d.isOfficialLetter && d.letterId) {
       items.push({ icon: Download, label: 'View / Download letter', onClick: () => { void (async () => { try { await leaveApi.requests.downloadLetter(d.requestId, d.letterId!) } catch (err) { toast.error(err instanceof Error ? err.message : 'Imeshindikana kupakua barua. / Failed to download letter.') } })() } })
     } else {
-      items.push({ icon: Download, label: 'View / Download document', onClick: () => { void (async () => { try { await leaveApi.requests.downloadDocument(d.requestId, d.id) } catch (err) { toast.error(err instanceof Error ? err.message : 'Imeshindikana kupakua hati. / Failed to download document.') } })() } })
+      items.push({ icon: Download, label: 'View / Download document', onClick: () => { void (async () => { try { await leaveApi.requests.downloadDocument(d.requestId, d.id) } catch (err) { const status = err instanceof ApiError ? err.status : 0; toast.error(status === 404 ? 'Hati haipatikani kwenye hifadhi. / Document not found in storage.' : status === 403 ? 'Hakuna ruhusa ya kupakua hati hii. / No permission to download this document.' : (err instanceof Error ? err.message : 'Imeshindikana kupakua hati. / Failed to download document.')) } })() } })
     }
     if (canDeleteDocs && !d.isOfficialLetter) {
       items.push({ icon: Trash2, label: 'Delete document', tone: 'danger' as const, onClick: () => setDeleteTarget({ id: d.id, name: d.name, requestId: d.requestId }) })
