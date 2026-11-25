@@ -74,6 +74,7 @@ import { ApprovalModal } from '@/components/leave/approval-modal'
 import { HrProcessingModal } from '@/components/leave/hr-processing-modal'
 import { PreviousDecisions } from '@/components/leave/previous-decisions'
 import { RequestLetterView } from '@/components/leave/views/request-letter-view'
+import { LetterView } from '@/components/leave/views/letter-view'
 
 /** Return-date control applies to the last approver in the chain, regardless of role. */
 function getLastStepRole(request: LeaveRequest): string | null {
@@ -198,6 +199,9 @@ export function RequestsView() {
   const [showApproveRequestLetter, setShowApproveRequestLetter] = useState(false)
   const [approveReturnDate, setApproveReturnDate] = useState(TODAY)
   const [approveIsPaid, setApproveIsPaid] = useState(true)
+  const [approveReferenceNumber, setApproveReferenceNumber] = useState('')
+  const [approveLetterBody, setApproveLetterBody] = useState('')
+  const [showPreviewLetter, setShowPreviewLetter] = useState(false)
   // Same signature ceremony as the Approvals queue: the API refuses
   // signature-less approvals, so every Grant path must collect one first.
   // The dialog opens only when the approver presses Grant, after they have
@@ -218,6 +222,9 @@ export function RequestsView() {
     setApproveIsPaid(true)
     setHrOpen(false)
     setPendingLetter(null)
+    setApproveReferenceNumber('')
+    setApproveLetterBody('')
+    setShowPreviewLetter(false)
   }
 
   const requestDecision = (r: LeaveRequest, decision: 'returned' | 'rejected') => {
@@ -465,7 +472,7 @@ export function RequestsView() {
     const items: RowMenuItem[] = [{ icon: Eye, label: 'View details', onClick: () => setDetail(r) }]
     const step = nextPending(r)
     if (canAct(r) && step) {
-      items.push({ icon: Check, label: 'Approve', onClick: () => { setApproveTarget({ request: r, stepOrder: step.order, isFinalStep: r.steps.filter((s) => s.status === 'pending').length === 1 }); setApproveReturnDate(r.startDate >= TODAY ? r.startDate : TODAY); resetSignature() } })
+      items.push({ icon: Check, label: 'Approve', onClick: () => { setApproveTarget({ request: r, stepOrder: step.order, isFinalStep: r.steps.filter((s) => s.status === 'pending').length === 1 }); setApproveReturnDate(r.startDate >= TODAY ? r.startDate : TODAY); setApproveReferenceNumber(r.referenceNumber ?? ''); setApproveLetterBody(r.letterBody ?? `Ombi lako la ${typeOf(r.leaveTypeId)?.name ?? r.leaveTypeId} la mwaka ${new Date().getFullYear()} limeidhinishwa.\n\nKipindi cha likizo: ${r.startDate} hadi ${r.endDate || '—'} (${r.days} siku). Tarehe ya kurudi kazini: ${r.endDate ? r.endDate : '—'}.\n\nAhsante.`); resetSignature() } })
       items.push({ icon: RotateCcw, label: 'Return to applicant', onClick: () => requestDecision(r, 'returned') })
       items.push({ icon: X, label: 'Reject', tone: 'danger', onClick: () => requestDecision(r, 'rejected') })
     }
@@ -876,7 +883,7 @@ export function RequestsView() {
         footer={
           detail && canAct(detail) && nextPending(detail) ? (
             <div className="flex flex-wrap items-center gap-2">
-              <Btn variant="emerald" onClick={() => { const s = nextPending(detail)!; setApproveTarget({ request: detail, stepOrder: s.order, isFinalStep: detail.steps.filter((step) => step.status === 'pending').length === 1 }); setApproveReturnDate(detail.startDate >= TODAY ? detail.startDate : TODAY); resetSignature(); setDetail(null) }}>
+              <Btn variant="emerald" onClick={() => { const s = nextPending(detail)!; setApproveTarget({ request: detail, stepOrder: s.order, isFinalStep: detail.steps.filter((step) => step.status === 'pending').length === 1 }); setApproveReturnDate(detail.startDate >= TODAY ? detail.startDate : TODAY); setApproveReferenceNumber(detail.referenceNumber ?? ''); setApproveLetterBody(detail.letterBody ?? `Ombi lako la ${typeOf(detail.leaveTypeId)?.name ?? detail.leaveTypeId} la mwaka ${new Date().getFullYear()} limeidhinishwa.\n\nKipindi cha likizo: ${detail.startDate} hadi ${detail.endDate || '—'} (${detail.days} siku). Tarehe ya kurudi kazini: ${detail.endDate ? detail.endDate : '—'}.\n\nAhsante.`); resetSignature(); setDetail(null) }}>
                 <Check className="w-3.5 h-3.5" /> Approve
               </Btn>
               <Btn variant="outline" className="border-orange-300 text-orange-700 hover:bg-orange-50 dark:text-orange-300 dark:hover:bg-orange-950" onClick={() => { const d = detail; setDetail(null); requestDecision(d, 'returned') }}>
@@ -1038,6 +1045,40 @@ export function RequestsView() {
                 rows={2}
                 placeholder="Maoni ya hiari kwa mwombaji…"
               />
+
+              {/* Response Letter preparation fields */}
+              <div className="space-y-3 border-t border-border pt-4">
+                <TextInput
+                  label="Kumb. Na / Reference Number"
+                  placeholder="Ingiza kumbukumbu ya barua"
+                  value={approveReferenceNumber}
+                  onChange={(e) => setApproveReferenceNumber(e.target.value)}
+                />
+                {approveReferenceNumber.trim() === '' && (
+                  <p className="text-[11px] text-rose-600 dark:text-rose-400">Kumb. Na ni lazima.</p>
+                )}
+
+                <div>
+                  <label className="mb-1.5 block text-[12px] font-semibold text-foreground">
+                    Maudhui ya Barua ya Majibu / Response Letter Body
+                  </label>
+                  <textarea
+                    value={approveLetterBody}
+                    onChange={(e) => setApproveLetterBody(e.target.value)}
+                    placeholder="Andika maudhui ya barua ya majibu hapa…"
+                    className="min-h-[420px] w-full resize-y rounded-lg border p-4 leading-7"
+                  />
+                </div>
+
+                <Btn
+                  variant="outline"
+                  type="button"
+                  onClick={() => setShowPreviewLetter(true)}
+                  disabled={!approveReferenceNumber.trim() || !approveLetterBody.trim()}
+                >
+                  Hakiki Barua / Preview Letter
+                </Btn>
+              </div>
             </div>
 
             <div className="flex items-center gap-2">
@@ -1067,7 +1108,7 @@ export function RequestsView() {
                 const target = approveTarget
                 setSignatureOpen(false)
                 if (!target) return
-                decide(target.request.id, target.stepOrder, 'approved', approveComment.trim() || undefined, target.isFinalStep ? approveReturnDate : undefined, path, hash, approveIsPaid, pendingLetter)
+                decide(target.request.id, target.stepOrder, 'approved', approveComment.trim() || undefined, target.isFinalStep ? approveReturnDate : undefined, path, hash, approveIsPaid, { referenceNumber: approveReferenceNumber.trim(), approvedDays: target.request.days, letterBody: approveLetterBody.trim() })
                 resetSignature()
                 setApproveTarget(null)
               }}
@@ -1090,6 +1131,53 @@ export function RequestsView() {
           </>
         )}
       </Modal>
+
+      {/* Preview letter modal — uses current unsaved form values */}
+      {showPreviewLetter && approveTarget && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+          <div className="relative max-h-[92vh] w-full max-w-4xl overflow-auto rounded-2xl bg-card p-4 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-foreground">Hakiki Barua / Preview Letter (Draft)</h3>
+              <button onClick={() => setShowPreviewLetter(false)} className="text-muted-foreground hover:text-foreground">✕</button>
+            </div>
+            <div className="overflow-x-auto pb-1">
+              <LetterView
+                request={{
+                  id: approveTarget.request.id,
+                  ref: approveReferenceNumber || approveTarget.request.ref,
+                  employeeId: approveTarget.request.employeeId,
+                  leaveTypeId: approveTarget.request.leaveTypeId,
+                  policyId: approveTarget.request.policyId,
+                  startDate: approveTarget.request.startDate,
+                  endDate: approveTarget.request.endDate,
+                  days: approveTarget.request.days,
+                  approvedDays: parseInt(approveReferenceNumber ? '0' : '0') || approveTarget.request.days,
+                  referenceNumber: approveReferenceNumber,
+                  letterBody: approveLetterBody,
+                  reason: approveTarget.request.reason,
+                  status: approveTarget.request.status,
+                  createdAt: approveTarget.request.createdAt,
+                  documents: approveTarget.request.documents,
+                  steps: approveTarget.request.steps,
+                  isPaid: approveTarget.request.isPaid,
+                  employeeOrg: approveTarget.request.employeeOrg,
+                }}
+                letter={{
+                  referenceNumber: approveReferenceNumber,
+                  approvedDays: approveTarget.request.days,
+                  letterBody: approveLetterBody,
+                }}
+                approvers={approveTarget.request.steps
+                  .filter((s) => Boolean(s.assigneeName))
+                  .map((s) => ({ name: s.assigneeName, role: s.roleLabel }))}
+              />
+            </div>
+            <div className="mt-3 flex justify-end">
+              <Btn variant="ghost" onClick={() => setShowPreviewLetter(false)}>Funga / Close Preview</Btn>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* The employee's application letter is a separate document with its
           own design — never the DPP response letter. */}
