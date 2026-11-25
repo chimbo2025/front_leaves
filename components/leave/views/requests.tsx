@@ -1111,7 +1111,7 @@ export function RequestsView() {
                 const target = approveTarget
                 setSignatureOpen(false)
                 if (!target) return
-                decide(target.request.id, target.stepOrder, 'approved', approveComment.trim() || undefined, target.isFinalStep ? approveReturnDate : undefined, path, hash, approveIsPaid, { referenceNumber: approveReferenceNumber.trim() || pendingLetter?.referenceNumber || '', approvedDays: pendingLetter?.approvedDays ?? (approvalProposedDays > 0 ? approvalProposedDays : target.request.days), letterBody: approveLetterBody.trim() || pendingLetter?.letterBody || '' })
+                decide(target.request.id, target.stepOrder, 'approved', approveComment.trim() || undefined, target.isFinalStep ? approveReturnDate : undefined, path, hash, approveIsPaid, { referenceNumber: approveReferenceNumber.trim() || pendingLetter?.referenceNumber || '', approvedDays: (pendingLetter?.approvedDays && pendingLetter.approvedDays > 0) ? pendingLetter.approvedDays : (approvalProposedDays > 0 ? approvalProposedDays : (target.request.days > 0 ? target.request.days : null)), letterBody: approveLetterBody.trim() || pendingLetter?.letterBody || '' })
                 resetSignature()
                 setApproveTarget(null)
               }}

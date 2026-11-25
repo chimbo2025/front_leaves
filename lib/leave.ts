@@ -230,7 +230,7 @@ export interface Approver {
 /** The letter payload captured by the HR final-processing modal. */
 export interface LetterData {
   referenceNumber: string
-  approvedDays: number
+  approvedDays: number | null
   letterBody: string
 }
 
