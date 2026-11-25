@@ -1,10 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { FileText, Lock, Eye, Unlock, Upload, ShieldCheck, Trash2, Plus, HardDrive, FileStack } from 'lucide-react'
+import { FileText, Lock, Eye, Unlock, Upload, ShieldCheck, Trash2, Plus, HardDrive, FileStack, Download } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { fmtShort, getEmployee, type Document } from '@/lib/leave'
 import { useLeave } from '@/components/leave/leave-context'
+import { leaveApi } from '@/lib/leave-api'
 import {
   SectionHeading,
   Panel,
@@ -95,6 +96,7 @@ export function DocumentsView() {
 
   const buildMenu = (d: (typeof allDocs)[number]): RowMenuItem[] => [
     { icon: Eye, label: 'View document details', onClick: () => setDetail({ doc: d }) },
+    { icon: Download, label: 'View / Download document', onClick: () => { void leaveApi.requests.downloadDocument(d.requestId, d.id) } },
     ...(canDeleteDocs
       ? [{ icon: Trash2, label: 'Delete document', tone: 'danger' as const, onClick: () => setDeleteTarget({ id: d.id, name: d.name, requestId: d.requestId }) }]
       : []),

@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Workflow,
   Shield,
+  Printer,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -53,7 +54,7 @@ import {
 } from '@/components/leave/shared'
 import { RequestDetail } from '@/components/leave/request-detail'
 import { RequestLetterView } from '@/components/leave/views/request-letter-view'
-import { LetterView } from '@/components/leave/views/letter-view'
+import { LetterView, printLetter } from '@/components/leave/views/letter-view'
 import { ApprovalModal } from '@/components/leave/approval-modal'
 import { HrProcessingModal } from '@/components/leave/hr-processing-modal'
 import { PreviousDecisions } from '@/components/leave/previous-decisions'
@@ -717,7 +718,13 @@ export function ApprovalsView({ onNavigate }: { onNavigate?: (v: string) => void
                   .map((s) => ({ name: s.assigneeName, role: s.roleLabel }))}
               />
             </div>
-            <div className="mt-3 flex justify-end">
+            <div className="mt-3 flex justify-between">
+              <Btn variant="outline" onClick={() => {
+                const page = document.querySelector('.letter-page') as HTMLElement
+                if (page) printLetter(page)
+              }}>
+                <Printer className="h-3.5 w-3.5" /> Chapisha / Print
+              </Btn>
               <Btn variant="ghost" onClick={() => setShowPreviewLetter(false)}>Funga / Close Preview</Btn>
             </div>
           </div>

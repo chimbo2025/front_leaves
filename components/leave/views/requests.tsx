@@ -23,6 +23,7 @@ import {
   Repeat,
   Siren,
   Trash2,
+  Printer,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -74,7 +75,7 @@ import { ApprovalModal } from '@/components/leave/approval-modal'
 import { HrProcessingModal } from '@/components/leave/hr-processing-modal'
 import { PreviousDecisions } from '@/components/leave/previous-decisions'
 import { RequestLetterView } from '@/components/leave/views/request-letter-view'
-import { LetterView } from '@/components/leave/views/letter-view'
+import { LetterView, printLetter } from '@/components/leave/views/letter-view'
 
 /** Return-date control applies to the last approver in the chain, regardless of role. */
 function getLastStepRole(request: LeaveRequest): string | null {
@@ -1174,7 +1175,13 @@ export function RequestsView() {
                   .map((s) => ({ name: s.assigneeName, role: s.roleLabel }))}
               />
             </div>
-            <div className="mt-3 flex justify-end">
+            <div className="mt-3 flex justify-between">
+              <Btn variant="outline" onClick={() => {
+                const page = document.querySelector('.letter-page') as HTMLElement
+                if (page) printLetter(page)
+              }}>
+                <Printer className="h-3.5 w-3.5" /> Chapisha / Print
+              </Btn>
               <Btn variant="ghost" onClick={() => setShowPreviewLetter(false)}>Funga / Close Preview</Btn>
             </div>
           </div>
